@@ -25,7 +25,7 @@ The screenshots show sample data.
 
 - **Web app:** plain JavaScript, HTML and CSS, with no build step
 - **Server:** a Node.js gateway written in TypeScript
-- **Storage:** Baby Buddy
+- **Storage:** [Baby Buddy](https://github.com/babybuddy/babybuddy), an open source baby tracker (BSD 2-Clause license). Little Days runs it unchanged and adds a phone-first app on top.
 - **Deployment:** Docker Compose on a home computer
 
 ## Status
