@@ -803,8 +803,13 @@ test('growth recovery reconciles a lost measurement and sends only untouched wri
   store.putSetting('app', 'unitContract', units);
   const rows: Record<string, Record<string, unknown>[]> = { weight: [], height: [], 'head-circumference': [] };
   const attempts: string[] = [];
-  const sessions = { request: async (_sid: string, request: {resource: string; method: string; body?: Record<string, unknown>}) => {
+  const sessions = { request: async (_sid: string, request: {resource: string; method: string; id?: string; body?: Record<string, unknown>}) => {
     if (request.resource === 'children') return { id: 7, slug: 'ada' };
+    if (request.id) {
+      const row = rows[request.resource].find(row => String(row.id) === request.id)!;
+      if (request.method === 'PATCH') Object.assign(row, request.body);
+      return { ...row };
+    }
     if (request.method === 'GET') return rows[request.resource] || [];
     attempts.push(request.resource);
     const row = { id: 20 + attempts.length, ...request.body };
@@ -813,12 +818,28 @@ test('growth recovery reconciles a lost measurement and sends only untouched wri
     return row;
   }};
   const records = createRecords({ store, sessions, now: () => fixedNow });
-  const payload = { operationId: '00000000-0000-4000-8000-000000000054', event: { type: 'growth', date: '2026-10-25', kg: 4, cm: 50, head: 35 } };
+  const payload = { operationId: '00000000-0000-4000-8000-000000000054', event: { type: 'growth', date: '2026-10-25', kg: 4, cm: 50, head: 35, recumbent: true } };
   try {
     assert.equal((await records.createEvent(session, payload)).status, 'pending');
     assert.deepEqual(await records.operation(session, payload.operationId), { status: 'saved', id: 'weight:21' });
     assert.deepEqual(attempts, ['weight', 'height', 'head-circumference']);
     assert.equal(store.getOperation(payload.operationId)?.babyBuddyIds.length, 3);
+    const { entries, childId } = await records.growth(session);
+    assert.equal(childId, 7);
+    const weight = entries.find(entry => entry.id === 'weight:21');
+    const length = entries.find(entry => entry.id === 'height:22');
+    assert.equal(weight?.growthPair, payload.operationId);
+    assert.equal(length?.growthPair, payload.operationId);
+    assert.equal(length?.recumbent, true);
+    const date = '2026-10-24';
+    assert.equal((await records.updateEvent(session, 'height:22', { operationId: testId(971), event: { type: 'growth', date, cm: 50 } })).status, 'saved');
+    const separated = (await records.growth(session)).entries;
+    assert.equal(separated.find(entry => entry.id === 'weight:21')?.date, '2026-10-25');
+    assert.equal(separated.find(entry => entry.id === 'height:22')?.date, date);
+    assert.equal(separated.find(entry => entry.id === 'height:22')?.growthPair, payload.operationId);
+    assert.equal((await records.updateEvent(session, 'weight:21', { operationId: testId(972), event: { type: 'growth', date, kg: 4 } })).status, 'saved');
+    const reunited = (await records.growth(session)).entries.filter(entry => entry.growthPair === payload.operationId);
+    assert.deepEqual(reunited.map(entry => [entry.id, entry.date, entry.recumbent]), [['height:22', date, true], ['weight:21', date, undefined]]);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

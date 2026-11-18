@@ -46,6 +46,8 @@ test('cancelled Undo restores the timer and ignores its late stop reply', async 
   const context: any = {
     S, Date, crypto: {randomUUID: () => 'undo-op'}, LittleDaysBunny: {react: () => {}}, setTimeout: () => 0, t: (key: string) => key === 'undone' ? 'Undone.' : key,
     render: () => {}, canUndo: () => true, wait: async () => {}, clearOperation: () => {},
+    homeReadAttempts: new Map(), queueMicrotask, refreshHomeEvidence: () => {},
+    recoverWrite: (error: unknown) => { throw error; },
     clearPendingToast: (id: string) => { if (S.toast?.undoId === id) S.toast = null; },
     clearOwnToast: () => { S.toast = null; },
     applyServerData: (state: any) => { S.run = state.run; },

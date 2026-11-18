@@ -291,6 +291,7 @@ select.field{height:56px}
 .ask-pill,.ask-space{display:flex;align-items:center;justify-content:center;gap:4px;min-height:48px;padding:0 16px 0 8px;white-space:nowrap}
 .fact-body,.fs-body{grid-column:2/-1;line-height:1.4;text-wrap:pretty;overflow-wrap:anywhere}
 .fact-actions,.fs-link{grid-column:2/-1;min-height:48px;display:flex;align-items:center}
+.fact-actions{gap:8px}
 .fact-actions>.text-link{min-height:48px;padding:0;justify-content:flex-start}
 .fact-size{visibility:hidden;pointer-events:none}
 /* A narrow card (a small phone, or 200 percent zoom) puts Ask under the title and gives every part its own row. */
@@ -634,7 +635,6 @@ html[data-theme=dim] .nav-row .glyph .ln{stroke:var(--ink)}
 .settings-card .portrait-tools{display:grid;gap:8px}
 .settings-card .portrait-upload{justify-content:center;white-space:normal;text-align:center}
 /* Insight card, from round 2: a long fact stops at 3 lines, and a card with one fact has no arrows, so its link sits closer to the card edge. */
-.fact-body,.fs-body{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}
 .insight:not(:has(.fact-navigation)) :is(.fact-actions,.fs-link){margin-bottom:-8px}
 
 /* look-match: charts

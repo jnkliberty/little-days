@@ -689,7 +689,7 @@ export function createRecords({ store, sessions, now = () => new Date() }: { sto
       }
     }
     entries.sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
-    return { entries, unavailable };
+    return { entries, unavailable, childId: config.id };
   }
   async function foods(session: Session) {
     requirePermission(store, session, 'children', 'view');
@@ -821,6 +821,12 @@ export function createRecords({ store, sessions, now = () => new Date() }: { sto
     if (!config) throw new HttpError(409, 'Set up the child before saving events.');
     if (event.what === 'appointment' || event.what === 'visit') requirePermission(store, session, 'children', 'view');
     const current = now(), mapped = mapEvent(event, config.id, current, unitContract(store));
+    if (event.type === 'growth' && event.recumbent === true && mapped.writes.some(item => item.resource === 'weight')) {
+      for (const item of mapped.writes.filter(item => item.resource === 'height' || item.resource === 'weight')) {
+        item.metadata.growthPair = operationId;
+        item.metadata.recumbent = item.resource === 'height';
+      }
+    }
     const by = loggedBy(event, owner), body = { event, writes: mapped.writes, local: mapped.local || null, by };
     const resource = mappedResource(mapped), existing = store.getOperation(operationId);
     if (existing) {
@@ -890,6 +896,10 @@ export function createRecords({ store, sessions, now = () => new Date() }: { sto
     const metadata = store.getEventMetadata(parsed.resource, parsed.id), by = loggedBy(event, metadata?.adult || session.adult), requestBody = { id, event, write, before: currentRow, by };
     // Editing one part must not split a feeding session in the counts.
     if (parsed.resource === 'feedings' && isRecord(metadata?.metadata) && metadata.metadata.sessionId) write.metadata.sessionId = metadata.metadata.sessionId;
+    if (event.type === 'growth' && isRecord(metadata?.metadata) && metadata.metadata.growthPair) {
+      write.metadata.growthPair = metadata.metadata.growthPair;
+      write.metadata.recumbent = metadata.metadata.recumbent === true;
+    }
     const record = begin(store, { id: operationId, adult: session.adult, resource: `update:${parsed.resource}`, intent: { action: 'update', target: id }, requestBody, metadata: { attempted: false } });
     if (!record.created) return operationResult(record.operation);
     if (['sleep', 'feed', 'bottle', 'pump'].includes(String(event.type)) && Object.hasOwn(event, 'expected')) checkExpected(store, record.operation, event.expected, currentRow);

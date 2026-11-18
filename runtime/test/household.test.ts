@@ -30,6 +30,19 @@ test('preferences validate web values and stay private to the authenticated adul
   } finally { store.close(); }
 });
 
+test('the optional growth chart retains the child and table choice and can be cleared', async () => {
+  const { store, sessions, records } = fixture(), household = createHousehold({ store, sessions, records: records as never });
+  const settings = { lang: 'en', units: 'metric', palette: 'Sorbet', night: false };
+  try {
+    const growthChart = { childId: 7, sex: 'girls' };
+    assert.equal(household.savePreference(adult, { ...settings, operationId: op('11'), growthChart }).status, 'saved');
+    assert.deepEqual((await household.state(adult)).preferences.growthChart, growthChart);
+    assert.throws(() => household.savePreference(adult, { ...settings, operationId: op('12'), growthChart: { childId: 7, sex: 'any' } }), { status: 400 });
+    assert.equal(household.savePreference(adult, { ...settings, operationId: op('13'), growthChart: null }).status, 'saved');
+    assert.equal((await household.state(adult)).preferences.growthChart, undefined);
+  } finally { store.close(); }
+});
+
 test('duty and reminders require known adults, deduplicate, and limit opt-in to self', async () => {
   const { store, sessions, records } = fixture();
   store.putSetting('app', 'people', ['Sage', 'Rowan']);

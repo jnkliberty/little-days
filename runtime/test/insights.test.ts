@@ -103,3 +103,110 @@ test('milestones require notes access and absent units never become milk estimat
   assert.ok(!result[0].body.includes('90'));
   assert.equal(facts([]).length,0);
 });
+
+for (const file of ['trends', 'personal-trends']) runInNewContext(readFileSync(new URL(`../web/${file}.js`, import.meta.url), 'utf8'), context);
+const trendDate = (offset: number) => new Date(Date.UTC(2026, 2, 18 + offset)).toISOString().slice(0, 10);
+const trend = (entries, available, extra = {}) => (context.LittleDaysPersonalTrends?.pool({
+  ...input, child: {birthDate:'2025-12-01'}, today: '2026-03-18', entries, readDates: new Set(available.map(trendDate)), ...extra
+}) || []);
+const range = (from: number, to: number) => Array.from({length: to - from + 1}, (_, i) => from + i);
+const feed = (day: number, minute = 600) => ({id: `feedings:${day}:${minute}`, type: 'feed', t: day * 1440 + minute});
+const period = (cards, topic, window) => cards.find(card => card.id.startsWith(`trend:${topic}:${window}:`));
+
+test('daily cutoffs count a cross-midnight feed once and exclude later prior-day feeds', () => {
+  const entries = [
+    {...feed(-1, 1430), sid: 'shared'}, {...feed(0, 10), sid: 'shared'},
+    feed(-1), feed(-1, 800), feed(0), feed(0, 620),
+  ];
+  assert.match(period(trend(entries, [-2, -1, 0]), 'feeds', 'day').body, /2 feeds.*today.*1 yesterday/);
+  assert.match(period(trend(entries, [-2, -1, 0], {nowMinutes: 800}), 'feeds', 'day').body, /2 feeds.*today.*2 yesterday/);
+  assert.equal(period(trend(entries, [-2, 0]), 'feeds', 'day'), undefined);
+});
+
+test('finished weeks need metric coverage and the same-time baseline gives the median and range', () => {
+  const entries = range(-14, 0).flatMap(day => day % 2 ? [feed(day)] : [feed(day), feed(day, 615)]);
+  const eleven = trend(entries.filter(entry => entry.t >= -11 * 1440), range(-12, 0));
+  assert.match(period(eleven, 'feeds', 'seven').body, /per day/);
+  assert.equal(period(eleven, 'feeds', 'week'), undefined);
+  assert.match(period(eleven, 'feeds', 'baseline').body, /median 1.*range 1 to 2.*7 days/);
+  assert.match(period(trend(entries, range(-15, 0)), 'feeds', 'week').body, /per day/);
+  const gap = trend(entries.filter(e => e.t < -1440 || e.t >= 0), range(-15, 0));
+  assert.match(period(gap, 'feeds', 'seven').body, /6 of 7 days/);
+  assert.equal(period(gap, 'feeds', 'week'), undefined);
+  assert.equal(period(trend(entries, range(-15, 0).filter(day => day !== -8)), 'feeds', 'week'), undefined);
+});
+
+test('unequal months compare daily averages and a sleep gap leaves the feed comparison intact', () => {
+  const entries = range(-76, 0).flatMap(day => [
+    feed(day), {id: `sleep:${day}`, type: 'sleep', t: day * 1440 + 100, dur: 60},
+    {id: `changes:${day}`, type: 'diaper', kind: 'B', t: day * 1440 + 400}
+  ]);
+  const available = range(-77, 0);
+  assert.match(period(trend(entries, available), 'feeds', 'month').body, /1.*1.*no change/i);
+  const gap = trend(entries.filter(e => e.id !== 'sleep:-30'), available);
+  assert.match(period(gap, 'sleep', 'month-coverage').body, /27 of 28 days/);
+  assert.equal(period(gap, 'sleep', 'month'), undefined);
+  assert.ok(period(gap, 'feeds', 'month'));
+});
+
+test('week and month cards suppress birth windows that cover only part of the period', () => {
+  const entries = range(-77, 0).map(day => feed(day));
+  const newborn = trend(entries.filter(entry => entry.t >= -4 * 1440), range(-77, 0), {child:{birthDate:trendDate(-4)}});
+  assert.equal(period(newborn, 'feeds', 'seven'), undefined);
+  assert.equal(period(newborn, 'feeds', 'week'), undefined);
+  assert.match(period(newborn, 'feeds', 'baseline').body, /4 days/);
+  const bornInJanuary = trend(entries, range(-77, 0), {child:{birthDate:'2026-01-20'}});
+  assert.ok(period(bornInJanuary, 'feeds', 'week'));
+  assert.equal(period(bornInJanuary, 'feeds', 'month'), undefined);
+  assert.equal(period(bornInJanuary, 'feeds', 'previous-month-coverage'), undefined);
+});
+
+test('daily sleep and feed comparisons exclude records unfinished at either cutoff', () => {
+  const entries = range(-7, 0).flatMap(day => [
+    {...feed(day), dur:15, sid:`earlier:${day}`},
+    {...feed(day, 670), dur:15, sid:`earlier:${day}`},
+    {id:`sleep:${day}:short`, type:'sleep', t:day * 1440 + 300, dur:60},
+    {id:`sleep:${day}:long`, type:'sleep', t:day * 1440 + 780, dur:180, live:day === 0},
+    {...feed(day, 880), dur:30, sid:`unfinished:${day}`, live:day === 0},
+    {...feed(day, 910), dur:15, sid:`unfinished:${day}`},
+  ]);
+  const cards = trend(entries, range(-8, 0), {nowMinutes:900});
+  assert.match(period(cards, 'sleep', 'day').body, /60 min.*60 min.*no change/);
+  assert.match(period(cards, 'sleep', 'baseline').body, /median 60 min.*range 60 min to 60 min/);
+  const feedDay = period(cards, 'feeds', 'day');
+  assert.match(feedDay.body, /1 feed.*1 yesterday.*no change/);
+  assert.equal(feedDay.evidence.length, 4);
+  assert.match(period(cards, 'feeds', 'baseline').body, /median 1.*range 1 to 1/);
+});
+
+test('completed overnight sleep is clipped, overlaps count once, and handoff evidence uses the start date', () => {
+  const entries = [
+    {id: 'sleep:1', type: 'sleep', t: -60, dur: 150},
+    {id: 'sleep:2', type: 'sleep', t: 60, dur: 60},
+    {id: 'sleep:past', type: 'sleep', t: -900, dur: 60},
+    {id: 'sleep:live', type: 'sleep', t: 480, dur: 30, live: true},
+    {id: 'changes:1', type: 'diaper', kind: 'B', t: 7 * 60},
+  ];
+  const cards = trend(entries, [-2, -1, 0], {handoffAt: -30});
+  assert.match(period(cards, 'sleep', 'day').body, /120 min.*60 min/);
+  const summary = period(cards, 'handoff', 'handoff');
+  assert.match(summary.body, /150 min.*7:00 AM/);
+  assert.equal(summary.evidence.find(item => item.id === 'sleep:1').date, '2026-03-17');
+  assert.match(period(cards, 'sleep', 'night').body, /180 min logged per night.*180 min/);
+  assert.match(period(trend(entries, [-2, -1, 0], {lang: 'es'}), 'handoff', 'handoff').title, /Desde las 7/);
+});
+
+test('bottle volume uses known amounts only, reports nursing separately and respects units', () => {
+  const entries = [
+    feed(0), {id: 'feedings:b', type: 'bottle', t: 520, ml: 60, unit: 'ml'},
+    {id: 'feedings:a', type: 'bottle', t: -920, ml: 30, unit: 'ml'},
+  ];
+  const card = period(trend(entries, [-2, -1, 0], {units: 'us'}), 'bottles', 'breakdown');
+  assert.match(card.body, /2 oz.*1 oz.*nursing/i);
+  entries.push({id: 'feedings:unknown', type: 'bottle', t: 530, ml: 90, unit: 'unknown'});
+  const missing = period(trend(entries, [-2, -1, 0]), 'bottles', 'breakdown');
+  assert.match(missing.body, /2 bottles.*amount missing/i);
+  assert.match(missing.body, /Measured bottles: 60 mL total, 60 mL per bottle/);
+  assert.doesNotMatch(missing.body, /yesterday|90|150/);
+  assert.deepEqual(Array.from(trend(entries, [-2, -1, 0], {permissions:{resources:{}}})), []);
+});

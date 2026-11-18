@@ -294,15 +294,18 @@ def audit_reminder_default(page):
     page.evaluate("() => { S.sheet=null; S.drafts={}; render(); }")
 
 
-def audit_other_label(page):
+def audit_other_label(page, state):
     # Owner request, 2026-11-08: "instead of Wren you should just have other". Display only: the account value stays Wren.
     body = "document.body.innerText"
+    original_language = state["preferences"].get("language", "en")
+    state["preferences"]["language"] = "en"
     page.evaluate("""() => { window.__otherBackup={entries:S.entries,duty:S.duty,lang:S.lang,sleepRun:S.sleepRun,careData:S.careData,careLoading:S.careLoading,tab:S.tab};
       S.entries=[...S.entries.map(e=>({...e,by:'Wren'})),{id:'reminders:other',type:'reminder',recipient:'Wren',by:'Wren',what:'feed',enabled:true,t:nowM()-1,day:0,hour:3,minute:20,period:'PM'}]; S.sleepRun={id:'timers:other',by:'Wren',startedAt:new Date().toISOString()};
       S.duty='Wren'; S.lang='en'; S.sheet=null; render(); }""")
     try:
         texts, account, chip_ok, sign_in, spanish = other_label_reads(page, body)
     finally:
+        state["preferences"]["language"] = original_language
         page.evaluate("() => { Object.assign(S, window.__otherBackup); S.sheet=null; render(); }")
     leaks = [name for name, text in texts.items() if "Wren" in text]
     if leaks:
@@ -1279,7 +1282,7 @@ def main():
 
             audit_person_switch(page, session_state)
             audit_reminder_default(page)
-            audit_other_label(page)
+            audit_other_label(page, current_state)
 
             # The transport adapter sends a mutation only when its server route is tested.
             mutation_requests = []

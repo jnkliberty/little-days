@@ -1,5 +1,6 @@
 """Fact carousel behavior in Chrome with sample data and no live writes."""
 import os
+import re
 import time
 
 # The app takes its time zone from the session. These checks send none, so the browser's own zone decides: pin it.
@@ -8,6 +9,7 @@ time.tzset()
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from playwright.sync_api import sync_playwright
 from check_support import launch_browser, open_app, start_static_server
 
@@ -37,21 +39,27 @@ def drag(page, start, end, touch=False):
     page.mouse.up()
 
 def body_point(page):
-    box = page.locator('.insight .fact-body').bounding_box()
-    return box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+    return page.locator('.insight .fact-content:not([data-fact-outgoing]) .fact-body').evaluate('e=>{'
+        'e.scrollIntoView({block:"nearest",inline:"nearest",behavior:"instant"});'
+        'const r=e.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]}')
 
 def audit_drag_tracking(page):
     """Failure cases not covered by release-only swipes: no finger tracking, a release jump, canceled drag, or motion under Reduce Motion."""
     page.emulate_media(reduced_motion='no-preference')
+    page.wait_for_function('!factMotion.matches&&!homeReading&&!growthPending&&!refreshingDay')
     page.evaluate('()=>{factPaused=true;render()}')
     x, y = body_point(page)
     first = fact(page)
     height = page.locator('.insight').evaluate('e=>e.offsetHeight')
     page.mouse.move(x, y)
     page.mouse.down()
+    press = page.evaluate('factSwipe && {origin:factSwipe.origin, current:factSwipe.content.isConnected, several:factSwipe.several}')
+    check(f'a pointer press starts on the current fact at rest ({press})', press and press['current'] and press['several'] and abs(press['origin']) < 1)
     page.mouse.move(x - 25, y, steps=3)
-    offset = page.locator('.fact-content:not([data-fact-outgoing])').evaluate('e=>new DOMMatrixReadOnly(getComputedStyle(e).transform).m41')
-    check('a horizontal drag follows the pointer before release', abs(offset + 25) < 1 and fact(page) == first)
+    track = page.locator('.fact-content:not([data-fact-outgoing])').evaluate(
+        'e=>({offset:new DOMMatrixReadOnly(getComputedStyle(e).transform).m41,same:e===factSwipe?.content})')
+    check(f'a horizontal drag follows the pointer before release ({track})',
+          track['same'] and abs(track['offset'] + 25) < 1 and fact(page) == first)
     page.mouse.up()
     check('a short fast drag keeps the 40px threshold and settles back', fact(page) == first and page.locator('.fact-content:not([data-fact-outgoing])').evaluate('e=>e.getAnimations().some(a=>new DOMMatrixReadOnly(a.effect.getKeyframes().at(-1).transform).m41===0 && a.effect.getTiming().duration<300)'))
     page.locator('.fact-content:not([data-fact-outgoing])').evaluate('e=>e.getAnimations().forEach(a=>a.finish())')
@@ -133,6 +141,155 @@ def audit_swipe(page):
     check('a plain tap on Ask still works after swipes', page.evaluate('S.tab') == 'chat')
     page.evaluate("()=>{S.tab='home';render()}")
 
+def update_backdated(route, history):
+    event = route.request.post_data_json['event']
+    minute = (datetime.fromisoformat(event['time']) - AT).total_seconds() / 60 + 720
+    next(row for row in history if row['id'] == 'feed-8')['t'] = minute
+    route.fulfill(json={'status': 'saved', 'id': 'feed-8'})
+
+def audit_household_clock(browser, base):
+    evening = AT + timedelta(hours=10)
+    page = open_app(browser, base, 390, 844, evening, ai=False)
+    try:
+        page.st['entries'] = [{'id': f'feed-{hour}', 'type': 'feed', 'side': 'L', 't': hour * 60} for hour in (11, 15, 21)]
+        for hour, title, count in [(12, '12:00', 2), (20, '8:00', 1)]:
+            page.st['dutyNoteAt'] = evening.replace(hour=hour).isoformat()
+            page.evaluate('pollFamily()')
+            handoff = page.evaluate('factPool().find(f=>f.topic==="handoff")')
+            check(f'a {hour}:00 household handoff starts at the correct clock time and counts {count} feeds',
+                  title in handoff['title'] and 'PM' in handoff['title'] and f'Feeds {count}.' in handoff['body'])
+    finally:
+        page.context.close()
+
+    after_midnight = AT.replace(hour=0, minute=1)
+    page = open_app(browser, base, 390, 844, after_midnight, ai=False)
+    try:
+        page.st['today'] = (after_midnight - timedelta(days=1)).date().isoformat()
+        page.st['entries'] = [{'id': 'late-sleep', 'type': 'sleep', 't': 1420, 'tEnd': 1435, 'dur': 15}]
+        page.st['run'] = {'id': 'timer-1', 'kind': 'feed', 'side': 'R', 't0': -9.5,
+                          'startedAt': (after_midnight - timedelta(minutes=10, seconds=30)).isoformat()}
+        page.reload()
+        page.locator('.insight').wait_for()
+        check('a state dated before browser midnight still loads the signed-in child',
+              page.evaluate('S.auth==="ready"&&S.child.name==="Ada"') and page.locator('#child-form').count() == 0)
+        check('the server record retains its household date and sleep interval',
+              page.evaluate('S.entries.some(e=>e.id==="late-sleep"&&e.t===-20&&e.tEnd===-5)'))
+        check('a live timer keeps its absolute start when its lookup crossed midnight',
+              page.evaluate('S.run.t0===-9.5'))
+        page.st['child'] = {**page.st['child'], 'id': 'child:2', 'name': 'Sky'}
+        page.st['entries'] = [{'id': 'new-child-feed', 'type': 'feed', 'side': 'R', 't': 1438, 'dur': 2}]
+        page.st['run'] = None
+        page.evaluate('pollFamily()')
+        check('a dated state reply replaces the previous child and records',
+              page.evaluate('S.child.name==="Sky"&&S.entries.length===1&&S.entries[0].id==="new-child-feed"&&S.entries[0].t===-2'))
+    finally:
+        page.context.close()
+
+
+def audit_history(browser, base, lang):
+    """Exercise dated reads from Home, including a second browser's backdated correction."""
+    page = open_app(browser, base, 390, 844, AT, lang=lang, development=True)
+    today = AT.date()
+    reads = []
+    failing = False
+    history = [{'id': f'feed-{d}', 'type': 'bottle', 't': 600 - d * 1440, 'ml': 60, 'unit': 'ml'} for d in range(15)]
+    history.append({'id': 'handoff-note', 'type': 'note', 'title': 'handoff', 't': 570})
+
+    def state(route):
+        range_ = parse_qs(urlparse(route.request.url).query)
+        start = range_.get('from', [(today - timedelta(days=1)).isoformat()])[0]
+        end = range_.get('to', [(today + timedelta(days=1)).isoformat()])[0]
+        lo = (datetime.fromisoformat(start).date() - today).days
+        hi = (datetime.fromisoformat(end).date() - today).days
+        reads.append((lo, hi))
+        if failing and lo <= -8 < hi:
+            route.fulfill(status=503, json={'error': 'History unavailable'})
+            return
+        preferences = page.st['preferences'] if not range_ else {**page.st['preferences'], 'units': 'us'}
+        route.fulfill(json={**page.st, 'today': today.isoformat(), 'preferences': preferences,
+                            'entries': [e for e in history if lo <= e['t'] // 1440 < hi]})
+
+    page.st['child']['id'] = '1'
+    page.st['preferences']['growthChart'] = {'childId': 1, 'sex': 'girls'}
+    measurements = [{'id': 'weight:1', 'type': 'growth', 'date': today.isoformat(), 'kg': 5.45, 'growthPair': 'one'},
+                    {'id': 'height:1', 'type': 'growth', 'date': today.isoformat(), 'cm': 60, 'growthPair': 'one', 'recumbent': True}]
+    page.route(re.compile(r'/api/state(\?.*)?$'), state)
+    page.route('**/api/growth', lambda r: r.fulfill(json={'entries': measurements, 'unavailable': []}))
+    page.clock.install(time=AT)
+    page.reload()
+    try:
+        page.wait_for_function('factPool().some(f => f.body.includes("60") && f.body.includes("mL"))')
+        check('Home requests older history directly, in chunks of 31 or fewer days', any(lo <= -14 for lo, _ in reads) and all(0 < hi - lo <= 31 for lo, hi in reads))
+        check('Home history leaves shared records and preferences unchanged',
+              page.evaluate('unitsOf()==="metric"&&!S.entries.some(e=>e.id==="feed-8")'))
+        check('the handoff summary uses the latest saved handoff time',
+              page.evaluate('factPool().some(f=>f.topic==="handoff"&&f.title.includes("9:30")&&f.body.includes("10:00"))'))
+        page.evaluate('factPaused=true; S.factId=factPool()[0].id; render()')
+        ids = []
+        for _ in range(page.locator('.fact-dot').count()):
+            ids.append(fact(page))
+            page.locator('[data-act=fact-next]').click()
+        check('the first two cards include personal and AI facts', not ids[0].startswith('source:') and ids[1].startswith('source:'))
+        check('both AI cards appear once in a full cycle with more personal cards', len(ids) == len(set(ids)) and sum(i.startswith('source:') for i in ids) == 2 and len(ids) > 4)
+        check('the current card wraps to the first card', fact(page) == ids[0])
+        page.wait_for_function('factPool().some(f => f.id.startsWith("growth:weight-for-length:"))')
+        page.evaluate('S.factId=factPool().find(f=>f.id.startsWith("growth:weight-for-length:")).id; render()')
+        check('the WHO comparison links to both the log and the published table',
+              page.locator('.insight [data-act=fact-log]').count() == 1 and 'who.int' in page.locator('.insight a').get_attribute('href'))
+        band = '15th to 50th percentile' if lang == 'en' else 'percentiles 15 a 50'
+        check('the WHO comparison displays the expected band and full reference group in the current language',
+              band in page.locator('.fact-body').inner_text()
+              and page.locator('.fact-body').evaluate('e=>e.scrollHeight<=e.clientHeight'))
+        page.screenshot(path=str(OUT/f'who-390-{lang}.png'), animations='disabled')
+        volume = page.evaluate('factPool().find(f => f.body.includes("60") && f.body.includes("mL")).id')
+        page.evaluate('(id) => {S.factId=id; render()}', volume)
+        check('a personal fact links to its records', page.locator('.insight [data-act=fact-log]').count() >= 1)
+        page.st['preferences']['units'] = 'us'
+        page.evaluate('pollFamily()')
+        page.wait_for_function('document.querySelector(".fact-body").textContent.includes("oz")')
+        check('sync converts the units and preserves the active fact', fact(page) == volume)
+        if lang == 'en':
+            x, y = body_point(page)
+            page.mouse.move(x, y)
+            page.mouse.down()
+            page.mouse.move(x - 25, y, steps=3)
+            page.st['preferences']['units'] = 'metric'
+            page.evaluate('pollFamily()')
+            page.wait_for_function('unitsOf()==="metric"')
+            check('sync leaves the current card in place during a drag',
+                  fact(page) == volume and page.evaluate('factSwipe.content.isConnected') and 'oz' in page.locator('.fact-body').inner_text())
+            page.mouse.move(x - 80, y, steps=4)
+            page.mouse.up()
+            check('the swipe completes normally after sync', fact(page) != volume)
+            second = open_app(browser, base, 390, 844, AT, ai=False)
+            try:
+                check('personal trends are available with AI switched off',
+                      second.evaluate('factPool().some(f=>f.id.startsWith("trend:"))') and second.locator('.insight [data-act=ask-ai]').count() == 0)
+                second.route(re.compile(r'/api/events/feed-8$'), lambda r: update_backdated(r, history))
+                weekly = 'factPool().some(f=>f.id.startsWith("trend:feeds:week:"))'
+                page.wait_for_function(weekly)
+                second.evaluate('(time)=>LittleDaysAPI.writes.updateEntry("feed-8",{type:"bottle",time,ml:60})',
+                                (AT - timedelta(days=9, hours=2)).isoformat())
+                page.clock.fast_forward(4 * 60000 + 15000)
+                page.wait_for_function(f'!({weekly})')
+                check('another browser’s backdated bottle edit reaches Home within the refresh interval', not page.evaluate(weekly))
+            finally:
+                second.context.close()
+            failing = True
+            page.clock.fast_forward(4 * 60000 + 15000)
+            page.wait_for_function('!homeReads.has(dayISO(-8))')
+            check('a failed history read removes the affected date from comparison coverage', not page.evaluate('homeReads.has(dayISO(-8))'))
+            failing = False
+            page.clock.fast_forward(30000)
+            page.wait_for_function('homeReads.has(dayISO(-8))')
+            page.st['permissions']['resources']['feedings']['view'] = False
+            page.evaluate('pollFamily()')
+            page.wait_for_function('!resourceAllowed("feedings")')
+            check('revoked feeding permission removes bottle facts', not page.evaluate('factPool().some(f=>f.id.startsWith("trend:feeds:")||f.id.startsWith("trend:bottles:"))'))
+    finally:
+        page.context.close()
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     server, base = start_static_server()
@@ -153,7 +310,7 @@ def main():
                     second = fact(page)
                     page.screenshot(path=str(OUT/f'playing-{width}-{lang}.png'), animations='disabled')
                     check('timer advances to another fact', second != first)
-                    check('daily records alternate with age-based guidance', first.startswith('record:') and second.startswith('source:'))
+                    check('daily records alternate with age-based guidance', not first.startswith('source:') and second.startswith('source:'))
                     check('one active position dot', page.locator('.fact-dot.current').count() == 1)
                     check('position is named for screen readers', '{' not in page.locator('.fact-dots').get_attribute('aria-label'))
                     page.locator('.insight').hover()
@@ -211,10 +368,10 @@ def main():
                         hidden=page.evaluate('S.factId')
                         page.clock.run_for(14000)
                         check('a hidden page stops rotation', page.evaluate('S.factId') == hidden)
-                        page.st['entries']=[{'id':'one','type':'feed','side':'L','dur':10,'t':600}]
+                        page.st['entries']=[{'id':'one','type':'feed','side':'L','dur':10,'t':360}]
                         page.st['child']['birthDate']=None  # no birth date: the server sends no daily guidance, so the page drops its batch below
                         page.evaluate("()=>{delete document.hidden;delete document.visibilityState;document.dispatchEvent(new Event('visibilitychange'))}")
-                        page.evaluate("()=>{S.entries=[{id:'one',type:'feed',side:'L',dur:10,t:600}];S.child={...S.child,birthDate:null};S.developmentBatch=null;S.factId='';factPaused=false;render()}")
+                        page.evaluate("()=>{S.entries=[{id:'one',type:'feed',side:'L',dur:10,t:360}];S.child={...S.child,birthDate:null};S.developmentBatch=null;S.factId='';factPaused=false;render()}")
                         single=fact(page)
                         page.clock.run_for(14000)
                         check('one fact shows no arrows, dots, or Pause and stays visible', bool(single) and fact(page)==single and page.locator('[data-act=fact-next], [data-act=fact-previous], .fact-dots, [data-act=fact-pause]').count()==0)
@@ -233,6 +390,9 @@ def main():
                         check('empty facts keep the empty state and show no navigation', fact(page)=='' and page.locator('[data-act=fact-next], .fact-dots, [data-act=fact-pause]').count()==0 and page.locator('.fact-dot').count()==0)
                     check('no browser errors', not page.errors)
                     page.context.close()
+                for lang in ('en', 'es'):
+                    audit_history(browser, base, lang)
+                audit_household_clock(browser, base)
             finally:
                 browser.close()
     finally:

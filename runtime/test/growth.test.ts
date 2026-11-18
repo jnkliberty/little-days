@@ -80,7 +80,7 @@ test('growth route requires a household session and returns private history thro
     const response = await fetch(url, { headers: { cookie: `__Host-little-days=${session.sessionId}` } });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    assert.deepEqual(await response.json(), { entries: [], unavailable: [] });
+    assert.deepEqual(await response.json(), { entries: [], unavailable: [], childId: 7 });
   } finally {
     app.closeAllConnections();
     await new Promise<void>(resolve => app.close(() => resolve()));

@@ -3,6 +3,8 @@ globalThis.LittleDaysTrends = (() => {
   const DAY_START = 7 * 60;
   const NIGHT_START = 12 * 60;  // 7 PM, counted from the 7 AM day start
   const WINDOW = 7;  // full days before today on every chart and in At a glance (owner request, 2026-11-11, R6)
+  const feedSessionKey = (entry, index) => entry.sid ? `session:${entry.sid}` : `entry:${entry.id ?? index}`;
+  const sleepEnd = entry => Number.isFinite(entry.tEnd) ? entry.tEnd : entry.t + entry.dur;
   const offsetOf = minute => Math.floor((minute - DAY_START) / DAY);
   const startOf = offset => offset * DAY + DAY_START;
   const shiftDate = (date, days) => {
@@ -16,16 +18,16 @@ globalThis.LittleDaysTrends = (() => {
   // jumps ahead, +60 when it falls back). The wall clock resumes at `at - 1 - minutes`, so a sleep across the change is two wall-clock
   // parts: one before the change and one after it. The parts draw on the wall-clock axis; sleep minutes come from `realSleep`.
   function addSleep(entry, byOffset) {
-    const end = Number.isFinite(entry.tEnd) ? entry.tEnd : entry.t + entry.dur;
+    const end = sleepEnd(entry);
     const change = entry.shift && !entry.live && Number.isFinite(entry.shift.at) && Number.isFinite(entry.shift.minutes) ? {at: entry.shift.at - 1, minutes: entry.shift.minutes} : null;
     const parts = change ? [[entry.t, change.at, 0], [change.at - change.minutes, end, 1]] : [[entry.t, end, null]];
     // The real start (minutes since 1970) tells the two passes of a repeated hour apart: a sleep with no clock-change marker still has it.
     const instant = Date.parse(entry.startISO) / 60000;
     for (const [offset, day] of byOffset) {
-      const base = startOf(offset);
-      if (change && change.at >= base && change.at < base + DAY) day.change = {at: change.at - base, minutes: change.minutes, instant: instant + change.at - entry.t};
+      const base = day.start ?? startOf(offset), limit = day.end ?? base + DAY;
+      if (change && change.at >= base && change.at < limit) day.change = {at: change.at - base, minutes: change.minutes, instant: instant + change.at - entry.t};
       for (const [from, to, phase] of parts) {
-        const start = Math.max(from, base), stop = Math.min(to, base + DAY);
+        const start = Math.max(from, base), stop = Math.min(to, limit);
         if (start >= stop) continue;
         (entry.live ? day.liveSleep : day.sleep).push([start - base, stop - base]);
         day.sleepParts.push([start - base, stop - base, phase, instant]);
@@ -46,7 +48,7 @@ globalThis.LittleDaysTrends = (() => {
   }
 
   function addFeed(entry, index, feedSessions) {
-    const key = entry.sid ? `session:${entry.sid}` : `entry:${entry.id ?? index}`;
+    const key = feedSessionKey(entry, index);
     const session = feedSessions.get(key) || {segments: []};
     session.segments.push(entry);
     feedSessions.set(key, session);
@@ -215,5 +217,17 @@ globalThis.LittleDaysTrends = (() => {
     };
   }
 
-  return {summarize, day, rows, totals, DAY_START, NIGHT_START, WINDOW};
+  function sleepWithin(entries, start, end) {
+    const day = {...makeDay(0), start, end}, windows = new Map([[0, day]]);
+    const evidence = [];
+    for (const entry of entries) {
+      const previous = day.sleepParts.length;
+      addSleep(entry, windows);
+      if (day.sleepParts.length > previous) evidence.push(entry);
+    }
+    const intervals = realSleep(day).map(([a,b]) => b - a);
+    return {total: intervals.reduce((sum, minutes) => sum + minutes, 0), longest: Math.max(0, ...intervals), evidence};
+  }
+
+  return {summarize, day, rows, totals, sleepWithin, sleepEnd, feedSessionKey, DAY_START, NIGHT_START, WINDOW};
 })();

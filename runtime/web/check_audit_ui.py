@@ -113,7 +113,6 @@ def open_page(browser, base, lang="en", me="Sam", timezone="America/Mexico_City"
     page.locator(".tile[data-act='open-feed'], .run, .dock").first.wait_for()
     page.wait_for_load_state("networkidle")
     page.requests.clear()
-    page.growth_requests.clear()
     return page
 
 
@@ -253,11 +252,12 @@ def audit_timeline_reload_counts(browser, base):
 
 
 def audit_charts_growth_counts(browser, base):
-    """Failure case: growth history is asked for on each visit to Charts, on each changed poll and after each save."""
+    """Home loads growth history once and Charts reuses it until a growth write."""
     page = open_page(browser, base)
     count = lambda: len(page.growth_requests)  # noqa: E731
+    check(f"Home asks for growth history once ({count()})", count() == 1)
     tab(page, "charts")
-    check(f"the first visit to Charts asks for growth history once ({count()})", count() == 1)
+    check(f"the first visit to Charts reuses growth history ({count()})", count() == 1)
     tab(page, "home")
     tab(page, "charts")
     check(f"a second visit asks again for nothing ({count()})", count() == 1)

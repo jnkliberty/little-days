@@ -7,7 +7,7 @@ Each audit names the failure it would catch.
 """
 import re
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright
@@ -120,6 +120,8 @@ def open_page(browser, base, lang="en", fake_clock=False, hidden=False, **state)
     page.route("**/api/operations/*", operation)
     page.goto(base)
     page.locator(".tile[data-act='open-feed'], .run, .dock").first.wait_for()
+    # Each audit counts or holds its own requests after the initial Home reads finish.
+    page.wait_for_function("!homeReading")
     page.requests.clear()
     return page
 
@@ -276,7 +278,9 @@ def audit_day_load_before_save(browser, base):
     page.wait_for_timeout(500)
     note = page.evaluate("S.entries.find(e => e.id === 'feedings:d2')?.note")
     check(f"after the edit the old reply is not shown ({note!r})", note == "new words")
-    check(f"the day was asked for once more ({state_requests(page)} requests)", state_requests(page) == 2)
+    reads = [request for request in page.requests if request == {
+        "from": (TODAY - timedelta(days=2)).isoformat(), "to": (TODAY - timedelta(days=1)).isoformat()}]
+    check(f"the day was asked for once more after the write ({len(reads)} requests)", len(reads) == 2)
     done(page)
 
 

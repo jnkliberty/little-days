@@ -841,6 +841,8 @@ def log_fixture(browser, base, state, kind="feed", start="2026-11-08T03:55:10.00
             return route.fulfill(json={"date": "2026-11-08", "status": "unavailable", "cards": []})
         if req.url.endswith("/api/ai/status"):  # Home asks once whether Ask can show; it is not a write
             return route.fulfill(json={"available": True})
+        if req.url.endswith("/api/growth"):
+            return route.fulfill(json={"entries": [], "unavailable": []})
         sent.append({"method": req.method, "url": req.url, **req.post_data_json})
         if mode["lost"]:
             return route.abort()

@@ -103,7 +103,12 @@ export function createHousehold({ store, sessions, records }: { store: Store; se
     if (!isRecord(payload) || !['en', 'es'].includes(String(payload.lang)) || !['metric', 'us'].includes(String(payload.units)) || !PALETTES.has(String(payload.palette)) || typeof payload.night !== 'boolean') {
       throw new HttpError(400, 'Choose a supported language, unit system, palette, and night setting.');
     }
-    return { lang: payload.lang, units: payload.units, palette: payload.palette, night: payload.night };
+    const chart = payload.growthChart;
+    if (chart != null && (!isRecord(chart) || !Number.isSafeInteger(chart.childId) || Number(chart.childId) <= 0
+      || (chart.sex !== 'girls' && chart.sex !== 'boys'))) throw new HttpError(400, 'Choose a supported growth chart.');
+    const growthChart = isRecord(chart) ? { childId: chart.childId, sex: chart.sex } : null;
+    return { lang: payload.lang, units: payload.units, palette: payload.palette, night: payload.night,
+      ...(growthChart ? { growthChart } : {}) };
   }
 
   async function state(session: Session, range?: Range) {

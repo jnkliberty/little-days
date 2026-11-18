@@ -21,7 +21,7 @@ The screenshots show a made-up baby and made-up records.
 ## Install
 
 ```sh
-git clone <REPOSITORY URL> little-days
+git clone https://github.com/jnkliberty/little-days.git
 cd little-days
 python3 install.py
 ```

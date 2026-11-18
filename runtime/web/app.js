@@ -171,51 +171,104 @@ function canStartTimer(){return resourceAllowed('timers','add')&&resourceAllowed
 // entries it applied, and the number of the newest reply whose shared fields it applied. An older reply cannot put back what a newer one changed.
 // A reply that started before a write result was applied is not applied at all. Returns 'stale' for that, 'old' when the shared fields were not applied, else 'applied'.
 const replyOrder={shared:0,days:new Map()};
+let homeReads=new Set(),homeDays=new Map(),homeReadAttempts=new Map(),homeReading=null,homeGrowthAt=0,homeGrowthDay='',homeScope=0,growthPending=0;
+const stateOwner=me=>String(typeof me==='object'?(me?.id||personName(me)):personName(me));
+const hasNewIdentity=state=>stateOwner(state.me)!==meKey()||String(state.child?.id||'')!==String(S.child?.id||'')||state.child?.birthDate!==S.child?.birthDate;
+const views=permissions=>['children','feedings','changes','sleep','weight','height','tummy-times','notes'].map(name=>permissions?.resources?.[name]?.view===true).join();
+function resetHomeEvidence(){
+  homeScope++;homeReads=new Set();homeDays=new Map();homeReadAttempts=new Map();homeReading=null;homeGrowthAt=0;homeGrowthDay='';
+}
+function shiftEntry(entry,offset){
+  return {...entry,t:entry.t+offset,
+    ...(Number.isFinite(entry.tEnd)?{tEnd:entry.tEnd+offset}:{}),
+    ...(entry.shift?{shift:{...entry.shift,at:entry.shift.at+offset}}:{})};
+}
+function datedEntries(today){
+  if(!S.entryDate||S.entryDate===today)return S.entries;
+  const offset=isoDay(S.entryDate,today)*1440;
+  return S.entries.map(entry=>shiftEntry(entry,offset));
+}
+function homeEntries(today){
+  const ownDay=date=>(homeDays.get(date)?.seq??0)>(replyOrder.days.get(date)??0);
+  const unique=new Map();
+  const add=(entry,seq)=>{
+    if(!unique.has(entry.id)||unique.get(entry.id).seq<=seq)unique.set(entry.id,{entry,seq});
+  };
+  for(const entry of datedEntries(today)){
+    const date=shiftISO(today,dayOf(entry.t));
+    if(!ownDay(date))add(entry,replyOrder.days.get(date)??0);
+  }
+  for(const [date,{entries,seq}] of homeDays){
+    if(!ownDay(date)||!homeReads.has(date))continue;
+    const offset=isoDay(date,today)*1440;
+    for(const entry of entries)add(shiftEntry(entry,offset),seq);
+  }
+  return hideDeleted([...unique.values()].map(({entry})=>entry)).sort((a,b)=>a.t-b.t);
+}
 function applyServerData(state,authoritative=false) {
   if(!state)return 'stale';
   // A state that came with a write result, or a full reload, has no number from a request: it takes the next one and is always applied.
   const ticket=(!authoritative&&LittleDaysAPI.ticketOf(state))||LittleDaysAPI.writeApplied();
   if(ticket.writes!==LittleDaysAPI.writeCount)return 'stale';
+  const today=todayISO();
+  // A snapshot can cross midnight in transit, but its relative times still use the server's date.
+  const serverDay=validDate(state.today)?state.today:today,offset=isoDay(serverDay,today)*1440;
   const shared=ticket.seq>replyOrder.shared;
+  const newIdentity=hasNewIdentity(state),newViews=views(state.permissions)!==views(S.permissions);
+  if(!shared&&(newIdentity||newViews))return 'stale';
+  if(newIdentity||newViews){resetHomeEvidence();factSwipe=null;S.growthRequest++;S.growthEntries=[];S.growthUnavailable=[];S.growthLoading=false;S.growthLoaded=false;}
   if(shared){applyIdentity(state);replyOrder.shared=ticket.seq;}
-  const entries=applyEntries(state,ticket.seq);
+  S.entries=datedEntries(today);S.entryDate=today;S.homeAccessBlocked=false;
+  const entries=applyEntries(state,ticket.seq,today,serverDay,offset);
   if(!shared&&!entries)return 'old';
   S.stateFingerprint=JSON.stringify(state);
   if(!shared)return 'old';
-  applySharedFields(state);
+  applySharedFields(state,today,offset);
   return 'applied';
 }
 // A different adult or child starts clean: the old person's chat, facts and cached days go.
 function applyIdentity(state) {
   if(state.sleepPaused!==undefined)S.sleepPaused=state.sleepPaused;
-  const nextOwner=String(typeof state.me==='object'?(state.me?.id||personName(state.me)):personName(state.me));
-  if(nextOwner!==meKey()||String(state.child?.id||'')!==String(S.child?.id||'')||state.child?.birthDate!==S.child?.birthDate){resetChat();S.factId='';S.factRecent=[];S.developmentBatch=null;S.developmentAttempt=null;S.entries=[];S.loadedRanges=new Set();S.photoFrom=null;S.growthLoaded=false;replyOrder.days.clear();}
+  if(hasNewIdentity(state)){resetChat();S.factId='';S.developmentBatch=null;S.developmentAttempt=null;S.entries=[];S.loadedRanges=new Set();S.photoFrom=null;replyOrder.days.clear();}
   S.me=state.me;S.people=Array.isArray(state.people)?state.people:[];S.child=state.child||null;
 }
 // The days this reply asked for (the default is yesterday and today) take its entries, but only the days where no newer reply was applied. Returns whether any day did.
-function applyEntries(state,seq) {
-  const incoming=Array.isArray(state.entries)?state.entries.map(e=>({...e,id:String(e.id)})):[];
-  const from=state.__range?.from||dayISO(-1),to=state.__range?.to||dayISO(1),lo=isoDay(from),hi=isoDay(to);
-  const newer=day=>replyOrder.days.get(dayISO(day))>=seq,mine=new Set();
+function applyEntries(state,seq,today,serverDay,offset) {
+  const incoming=Array.isArray(state.entries)?state.entries.map(e=>({...(offset?shiftEntry(e,offset):e),id:String(e.id)})):[];
+  const keyOfDay=day=>shiftISO(today,day);
+  const from=state.__range?.from||shiftISO(serverDay,-1),to=state.__range?.to||shiftISO(serverDay,1),lo=isoDay(from,today),hi=isoDay(to,today);
+  const newer=day=>replyOrder.days.get(keyOfDay(day))>=seq,mine=new Set();
   for(let day=lo;day<hi;day++)if(!newer(day))mine.add(day);
   for(const e of incoming)if(!newer(dayOf(e.t)))mine.add(dayOf(e.t));
   const kept=S.entries.filter(e=>!(dayOf(e.t)>=lo&&dayOf(e.t)<hi&&mine.has(dayOf(e.t)))),taken=incoming.filter(e=>mine.has(dayOf(e.t)));
   const byId=new Map([...kept,...taken].map(e=>[String(e.id),e]));
   // A measurement added, changed or removed on a day loaded before (another adult's save) makes the growth history out of date.
-  const seen=new Set([...mine].filter(day=>replyOrder.days.has(dayISO(day))));
+  const seen=new Set([...mine].filter(day=>replyOrder.days.has(keyOfDay(day))));
   const growthOn=()=>JSON.stringify(S.entries.filter(e=>e.type==='growth'&&seen.has(dayOf(e.t))).map(e=>[String(e.id),e.t,e.kg,e.cm,e.head]));
   const growthBefore=growthOn();
   S.entries=hideDeleted([...byId.values()]).sort((a,b)=>a.t-b.t);
   if(growthOn()!==growthBefore)growthChanged();
-  for(const day of mine)replyOrder.days.set(dayISO(day),seq);
+  for(const day of mine){
+    const key=keyOfDay(day);
+    replyOrder.days.set(key,seq);
+    if(day>=lo&&day<hi)homeReads.add(key);
+  }
   return mine.size>0;
 }
-function applySharedFields(state) {
-  S.upcomingAppointments=Array.isArray(state.upcomingAppointments)?state.upcomingAppointments.map(e=>({...e,id:String(e.id)})):[];
+function applySharedFields(state,today,offset) {
+  const timerAt=timer=>{
+    if(!offset||!Number.isFinite(timer?.t0))return timer;
+    const instant=Date.parse(timer.startedAt),start=Number.isFinite(instant)?localClock(timer.startedAt):null;
+    // The timer lookup can cross midnight after the server has built the records.
+    const t0=start?isoDay(start.date,today)*1440+start.hour24*60 + +start.minute + Math.floor(instant%60000/1000)/60:timer.t0+offset;
+    return {...timer,t0};
+  };
+  S.upcomingAppointments=Array.isArray(state.upcomingAppointments)?state.upcomingAppointments.map(e=>({...(offset?shiftEntry(e,offset):e),id:String(e.id)})):[];
   S.pendingChildSetup=state.pendingChildSetup||null;
-  S.run=state.run===undefined?S.run:state.run;S.sleepRun=state.sleepRun===undefined?S.sleepRun:state.sleepRun;S.pumpRun=state.pumpRun===undefined?S.pumpRun:state.pumpRun;S.timers=Array.isArray(state.timers)?state.timers:[];S.preferences=state.preferences||{};S.permissions=state.permissions||{};S.dutyNote=state.dutyNote||'';S.dutyNoteBy=state.dutyNoteBy||state.dutyNoteAuthor||'';
+  S.run=state.run===undefined?S.run:timerAt(state.run);S.sleepRun=state.sleepRun===undefined?S.sleepRun:timerAt(state.sleepRun);S.pumpRun=state.pumpRun===undefined?S.pumpRun:timerAt(state.pumpRun);S.timers=Array.isArray(state.timers)?state.timers.map(timerAt):[];S.preferences=state.preferences||{};S.permissions=state.permissions||{};S.dutyNote=state.dutyNote||'';S.dutyNoteBy=state.dutyNoteBy||state.dutyNoteAuthor||'';
   const id=String(typeof S.me==='object'?(S.me.id||personName(S.me)):personName(S.me));
   S.units[id]=S.preferences.units==='us'?'us':'metric';{const saved=S.preferences.lang||S.preferences.language;S.lang=saved==='es'||saved==='en'?saved:DEFAULT_LANG;}S.pal=S.preferences.palette||'Sorbet';S.night=!!S.preferences.night;
+  S.handoffAt=Date.parse(state.dutyNoteAt||'');
   S.duty=personName(S.people.find(p=>p.onDuty||p.on_duty)||S.me)||'';
   S.loadedDay=todayISO();
   queueMicrotask(()=>void loadDailyDevelopment());
@@ -228,27 +281,106 @@ async function checkAiAvailability(){
   try{const status=await LittleDaysAPI.aiStatus();if(S.chat===chat&&chat.available===null){chat.available=status.available===true;if(!chat.available)render();}}catch{}
 }
 async function loadDailyDevelopment(){
-  if(!LittleDaysAPI.ai||S.auth!=='ready'||!resourceAllowed('children')||!S.child)return;
+  if(!LittleDaysAPI.ai||S.auth!=='ready'||S.homeAccessBlocked||!resourceAllowed('children')||!S.child)return;
   const key=`${meKey()}:${S.child.id}:${S.child.birthDate}:${todayISO()}`;
   if(S.developmentAttempt?.key===key&&Date.now()<S.developmentAttempt.until)return;
   const attempt={key,until:Infinity};S.developmentAttempt=attempt;
   const current=()=>S.developmentAttempt===attempt&&S.auth==='ready'&&resourceAllowed('children')&&key===`${meKey()}:${S.child?.id}:${S.child?.birthDate}:${todayISO()}`;
-  try{const batch=await LittleDaysAPI.development();if(!current())return;S.developmentBatch=batch;attempt.until=batch.status==='ready'?Infinity:Date.now()+15*60000;render();}
-  catch{if(current()){S.developmentBatch=null;attempt.until=Date.now()+15*60000;render();}}
+  try{const batch=await LittleDaysAPI.development();if(!current())return;S.developmentBatch=batch;attempt.until=batch.status==='ready'?Infinity:Date.now()+15*60000;renderHomeCard();}
+  catch{if(current()){S.developmentBatch=null;attempt.until=Date.now()+15*60000;renderHomeCard();}}
 }
 function loadServerState(state) {
   S.foodRequest=(S.foodRequest||0)+1;S.foodEntries=[];S.foodLoading=false;S.foodError=false;
   applyServerData(state,true);  // a full load: no write result or older reply can make it stale
-  S.growthRequest++;S.growthEntries=[];S.growthUnavailable=[];S.growthLoading=false;S.growthError=false;S.growthLoaded=false;
+  S.growthRequest++;S.growthEntries=[];S.growthUnavailable=[];S.growthLoading=false;S.growthError=false;S.growthLoaded=false;homeGrowthAt=0;
   S.day=0;S.sheet=null;S.toast=null;S.loadedDay=todayISO();S.auth=S.child?'ready':'setup';S.message='';
   if(S.auth==='setup'&&S.pendingChildSetup)S.setupDraft={firstName:S.pendingChildSetup.firstName||'',birthDate:S.pendingChildSetup.birthDate||'',dueDate:S.pendingChildSetup.dueDate||'',_operationId:S.pendingChildSetup.operationId};
   resumePendingOperations(state.pendingOperations);
+  queueMicrotask(()=>refreshHomeEvidence());
 }
 function resumeChildSetup(pending){const id=pending.operationId;if(!id||S.pendingOps[id])return;const draft=S.setupDraft||{firstName:pending.firstName||'',birthDate:pending.birthDate||'',dueDate:pending.dueDate||'',_operationId:id};S.setupDraft=draft;const context={undoable:false,toast:false,operationOwner:draft,onSaved:result=>{S.setupDraft=null;if(result.state)loadServerState(result.state);else void refreshSetupState();}};void pollOperation({status:pending.status||'pending',operationId:id},'',context);}
 async function refreshSetupState(){try{loadServerState(await LittleDaysAPI.state());}catch(error){S.auth='setup';S.message=error.message||t('tryAgain');render();}}
 function resumePendingOperations(operations=[]){if(S.auth==='setup'&&S.pendingChildSetup){resumeChildSetup(S.pendingChildSetup);return;}for(const op of operations||[]){if(!op?.operationId||S.pendingOps[op.operationId])continue;if(op.needsRetry&&op.requiresPhoto){const context={undoable:false,toast:false};S.pendingOps[op.operationId]={label:()=>t('savedItem',t('note')),context,photoRetry:true};S.photoRetry={operationId:op.operationId,event:op.event,portrait:!!op.portrait};S.retryAction=()=>document.querySelector('#retry-photo-picker')?.click();S.retryLabel=t('retry');S.message=t('photoRetry');continue;}void pollOperation(op,()=>t('saved'),{undoable:false,toast:false});}}
 // Seven full days and today, each from 7 AM; the day before the first one comes too, for a sleep that began there.
 const trendRange=()=>({from:dayISO(-9),to:dayISO(1)});
+// Read the two finished months, the current month and the prior date for overnight records.
+const HOME_RECHECK=4*60000;
+const homeVisible=()=>S.auth==='ready'&&S.tab==='home'&&!document.hidden;
+function homeHistoryRanges(today){
+  const first=globalThis.LittleDaysPersonalTrends?.historyStart(today);
+  if(!first)return [];
+  const earliest=isoDay(first,today);
+  const ranges=[];
+  for(let last=-2;last>=earliest;){
+    const start=Math.max(last-30,earliest);
+    ranges.push({from:shiftISO(today,start),to:shiftISO(today,last+1),dates:Array.from({length:last-start+1},(_,i)=>shiftISO(today,start+i))});
+    last=start-1;
+  }
+  return ranges;
+}
+function refreshHomeEvidence(afterWrite=false){
+  if(!homeVisible()||S.busy&&!afterWrite||S.homeAccessBlocked||!resourceAllowed('children'))return;
+  const today=todayISO(),now=Date.now();
+  if((resourceAllowed('weight')||resourceAllowed('height'))&&(now>=homeGrowthAt||today!==homeGrowthDay))void loadGrowthHistory();
+  if(homeReading||!['feedings','changes','sleep'].some(name=>resourceAllowed(name)))return;
+  const ranges=homeHistoryRanges(today),scope=homeScope;
+  if(!ranges.length)return;
+  const active=new Set(ranges.map(({from,to})=>from+'/'+to));
+  for(const key of homeReadAttempts.keys())if(!active.has(key))homeReadAttempts.delete(key);
+  for(const date of homeReads)if(date<ranges.at(-1).from)homeReads.delete(date);
+  for(const date of homeDays.keys())if(date<ranges.at(-1).from)homeDays.delete(date);
+  const due=ranges.filter(({from,to})=>(homeReadAttempts.get(from+'/'+to)??0)<=now);
+  if(!due.length)return;
+  const request={};
+  homeReading=request;
+  void (async()=>{
+    for(const {from,to,dates} of due){
+      if(scope!==homeScope||today!==todayISO()||!homeVisible())break;
+      const key=from+'/'+to,prior=dates.map(date=>replyOrder.days.get(date));
+      try{
+        const state=await LittleDaysAPI.state(from,to);
+        if(scope!==homeScope||today!==todayISO()||!homeVisible())break;
+        const ticket=LittleDaysAPI.ticketOf(state);
+        if(!ticket||ticket.writes!==LittleDaysAPI.writeCount)continue;
+        if(hasNewIdentity(state)||views(state.permissions)!==views(S.permissions)){
+          if(ticket.seq>replyOrder.shared){blockHomeEvidence();renderHomeCard();void pollFamily();}
+          break;
+        }
+        const records=Array.isArray(state.entries)?state.entries:[];
+        const serverDay=validDate(state.today)?state.today:today;
+        const buckets=new Map(dates.map(date=>[date,[]]));
+        for(const entry of records){
+          if(!['feed','bottle','diaper','sleep','note'].includes(entry.type)||!Number.isFinite(entry.t))continue;
+          const day=dayOf(entry.t);
+          buckets.get(shiftISO(serverDay,day))?.push(shiftEntry({...entry,id:String(entry.id)},-day*1440));
+        }
+        for(const [date,entries] of buckets){
+          if((replyOrder.days.get(date)??0)>ticket.seq)continue;
+          homeDays.set(date,{seq:ticket.seq,entries});
+          homeReads.add(date);
+        }
+        if(scope===homeScope){
+          // Stagger recurring checks after the first load of the three chunks.
+          const slot=homeReadAttempts.has(key)?0:ranges.findIndex(range=>range.from===from)*60000;
+          homeReadAttempts.set(key,now+HOME_RECHECK-slot);
+        }
+        renderHomeCard();
+      }catch(error){
+        if(scope!==homeScope||today!==todayISO()||!homeVisible())break;
+        if(error.status===401){await signInAgain(false);break;}
+        if(error.status===403){blockHomeEvidence();renderHomeCard();void pollFamily();break;}
+        homeReadAttempts.set(key,Date.now()+15000);
+        dates.forEach((date,i)=>{if(replyOrder.days.get(date)===prior[i])homeReads.delete(date);});
+        renderHomeCard();
+      }
+    }
+  })().finally(()=>{if(homeReading===request)homeReading=null;});
+}
+function blockHomeEvidence(){
+  resetHomeEvidence();S.homeAccessBlocked=true;factSwipe=null;
+  S.developmentBatch=null;S.developmentAttempt=null;
+  S.growthRequest++;S.growthEntries=[];S.growthLoading=false;S.growthLoaded=false;
+}
 async function syncFamily() {
   if(S.auth!=='ready'||S.busy)return;
   try {
@@ -258,13 +390,17 @@ async function syncFamily() {
     // A reply that started before a save was applied is dropped; the next poll asks again.
     if(outcome==='stale'){if(hadError&&!chartDrag)render();return;}
     if(outcome==='applied')resumePendingOperations(state.pendingOperations);
-    const changed=before!==S.stateFingerprint, clockChanged=S.tab==='charts'&&S.chartRenderedMinute!==`${todayISO()}:${nowM()}`;
+    const changed=before!==S.stateFingerprint,minute=`${todayISO()}:${nowM()}`;
+    const clockChanged=S.tab==='charts'&&S.chartRenderedMinute!==minute;
     if(changed&&chartDrag)S.chartDirty=true;
     const clockRender=(clockChanged||S.tab==='charts'&&S.chartDirty)&&!S.sheet&&!S.toast;
     if((changed||clockRender||hadError)&&!chartDrag)render();
+    else if(S.homeRenderedMinute!==minute)renderHomeCard();
   } catch(error) {
     if(error.status===401){await signInAgain(false);return;}
     // The browser's own word ("Failed to fetch") is not shown. The next good poll takes the text away.
+    if(error.status===403)blockHomeEvidence();
+    homeReads.delete(dayISO(-1));homeReads.delete(todayISO());
     S.message=S.pollError=t('tryAgain');if(!S.sheet&&!S.toast)render();
   }
 }
@@ -289,12 +425,16 @@ async function loadDayRange(first,last,force=false,again=true){
 const loadTimelineOneDay=(day,force=false)=>loadDayRange(day,day,force);
 async function loadTrendRange(){const {from,to}=trendRange();if(S.trendsLoading)return;S.trendsLoading=true;S.trendsError=false;render();try{const state=await LittleDaysAPI.state(from,to);state.__range={from,to};applyServerData(state);}catch{S.trendsError=true;}finally{S.trendsLoading=false;render();}}
 async function loadGrowthHistory() {
+  if(growthPending&&growthPending===S.growthRequest)return;
   const request=++S.growthRequest,owner=meKey(),child=String(S.child?.id||'');
-  S.growthLoading=S.growthEntries.length===0;S.growthError=false;render();
+  growthPending=request;
+  homeGrowthAt=Date.now()+HOME_RECHECK;homeGrowthDay=todayISO();
+  S.growthLoading=S.growthEntries.length===0;S.growthError=false;
+  if(S.tab==='charts')render();
   const current=()=>request===S.growthRequest&&S.auth==='ready'&&owner===meKey()&&child===String(S.child?.id||'');
-  try{const data=await LittleDaysAPI.growth();if(!current())return;S.growthEntries=Array.isArray(data.entries)?data.entries:[];S.growthUnavailable=Array.isArray(data.unavailable)?data.unavailable:[];S.growthLoaded=true;}
-  catch{if(current())S.growthError=true;}
-  finally{if(current()){S.growthLoading=false;render();}}
+  try{const data=await LittleDaysAPI.growth();if(!current())return;if(data.childId!=null&&String(data.childId)!==child)throw new Error('Growth data belongs to a different child');S.growthEntries=Array.isArray(data.entries)?data.entries:[];S.growthUnavailable=Array.isArray(data.unavailable)?data.unavailable:[];S.growthLoaded=true;}
+  catch{if(current()){S.growthEntries=[];S.growthLoaded=false;S.growthError=true;homeGrowthAt=Date.now()+15000;}}
+  finally{if(growthPending===request)growthPending=0;if(current()){S.growthLoading=false;if(S.tab==='charts')render();else renderHomeCard();}}
 }
 async function submitChild(draft){
   if(!resourceAllowed('children','add')){S.message=t('waitingProfile');render();return;}
@@ -454,7 +594,7 @@ const S = {chartSource: 'feeds', pal: 'Sorbet', lang: DEFAULT_LANG, night: false
 const todayISO = () => {const p=new Intl.DateTimeFormat('en-CA',{timeZone:LittleDaysZone.get(),year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());return `${p.find(x=>x.type==='year').value}-${p.find(x=>x.type==='month').value}-${p.find(x=>x.type==='day').value}`;};
 const nowM = () => { const p=new Intl.DateTimeFormat('en-GB',{timeZone:LittleDaysZone.get(),hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date()); return +(p.find(x=>x.type==='hour')?.value||0)*60 + +(p.find(x=>x.type==='minute')?.value||0); };
 function timerElapsed(timer){const started=Date.parse(timer?.startedAt||'');return Number.isFinite(started)?Math.max(0,(Date.now()-started)/60000):Math.max(0,nowM()-(timer?.t0??nowM()));}
-S.factId='';S.factRecent=[];resetChat();
+S.factId='';resetChat();
 let ID = 100, SID = 100, toastTimer = null;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const pad = n => String(n).padStart(2, '0');
@@ -506,13 +646,13 @@ const mmss = m => {  // elapsed timer as a duration ("14 m 05 s"), never a clock
 const runClock=mmss;
 const shiftISO=(iso,d)=>{const [y,m,day]=iso.split('-').map(Number),x=new Date(Date.UTC(y,m-1,day+d));return `${x.getUTCFullYear()}-${pad(x.getUTCMonth()+1)}-${pad(x.getUTCDate())}`};
 const dayISO=d=>shiftISO(todayISO(),d);
-const isoDay=s=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(s||''))return NaN;const [y,m,d]=s.split('-').map(Number),x=new Date(Date.UTC(y,m-1,d));if(x.getUTCFullYear()!==y||x.getUTCMonth()!==m-1||x.getUTCDate()!==d)return NaN;const [ty,tm,td]=todayISO().split('-').map(Number);return Math.round((Date.UTC(y,m-1,d)-Date.UTC(ty,tm-1,td))/86400000);};
+const isoDay=(s,today=todayISO())=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(s||''))return NaN;const [y,m,d]=s.split('-').map(Number),x=new Date(Date.UTC(y,m-1,d));if(x.getUTCFullYear()!==y||x.getUTCMonth()!==m-1||x.getUTCDate()!==d)return NaN;const [ty,tm,td]=today.split('-').map(Number);return Math.round((Date.UTC(y,m-1,d)-Date.UTC(ty,tm-1,td))/86400000);};
 const clockAt=(h,m,p)=>`${+h||12}:${pad(m)} ${S.lang==='es'?(p==='PM'?'p. m.':'a. m.'):p}`;
 const dateLabel = d => { const x = new Date(`${dayISO(d)}T12:00:00Z`); const mo = S.lang === 'es' ? ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return S.lang === 'es' ? `${x.getUTCDate()} ${mo[x.getUTCMonth()]}` : `${mo[x.getUTCMonth()]} ${x.getUTCDate()}`; };
 const kindWord = k => k === 'W' ? t('wet') : k === 'D' ? t('dirty') : t('both');
 
 const factMotion=matchMedia('(prefers-reduced-motion: reduce)');
-let factPaused=false,factTimer=null,factTimerId='';
+let factPaused=false,factTimer=null,factTimerId='',factRedraw=false,factSwipeFacts=null;
 
 /* ---------- home ---------- */
 // Day totals, midnight to midnight. A part that is zero is left out, and an empty day shows no line.
@@ -527,7 +667,9 @@ const joinUnits=text=>text.replace(/(\d) (?=[a-zñ])/gi,'$1\u00a0');
 // The fact's care type picks the icon block. A fact about no care type (an age tip, tummy time, a milestone) gets the neutral block.
 const FACT_LOOK={feeds:['c-feed','bottle'],diapers:['c-dia','diaper'],sleep:['c-sleep','moon']};
 function statusCard() {
-  const fact=currentFact(),facts=factPool(),ref=fact?.evidence[0],index=facts.findIndex(f=>f.id===fact?.id),several=facts.length>1,askOn=!!LittleDaysAPI.ai;
+  const facts=S.renderedFacts=factSwipeFacts||factPool(),fact=currentFact(facts),index=facts.findIndex(f=>f.id===fact?.id),several=facts.length>1,askOn=!!LittleDaysAPI.ai;
+  const record=fact?.evidence.find(ref=>ref.kind==='record'),source=fact?.evidence.find(ref=>ref.kind==='source');
+  const refs=[record,source].filter(Boolean).map(ref=>referenceHTML(ref,true)).join('');
   const [tone,art]=FACT_LOOK[fact?.topic]||['c-plain','sprout'];
   const title=fact?.title||t('factEmpty'),body=fact?.body||t('factEmptyBody');
   const dots=facts.map((f,i)=>`<span class="fact-dot${i===index?' current':''}"></span>`).join('');
@@ -535,14 +677,29 @@ function statusCard() {
   const sizers=(facts.length?facts:[{title,body}]).map(f=>`<span class="fact-size" aria-hidden="true"><i class="fs-icon"></i><b class="fs-title" data-text="${esc(f.title)}"></b>${askOn?`<i class="ask-space" data-text="${esc(t('askShort'))}"></i>`:''}<span class="fs-body" data-text="${esc(f.body)}"></span><i class="fs-link"></i></span>`).join('');
   const pause=several&&!factMotion.matches?`<button type="button" class="text-link fact-pause" data-act="fact-pause">${glyph(factPaused?'play':'pause')}${t(factPaused?'factPlay':'factPause')}</button>`:'';
   const nav=several?`<div class="fact-navigation"><button type="button" class="fact-arrow" data-act="fact-previous" aria-label="${t('factPrevious')}">${glyph('back')}</button><div class="fact-dots" role="img" aria-label="${esc(t('factPosition',Math.max(0,index+1),facts.length))}"><span aria-hidden="true">${dots}</span></div><button type="button" class="fact-arrow" data-act="fact-next" aria-label="${t('factNext')}">${glyph('chev')}</button>${pause}</div>`:'';
-  return `<section class="card status insight ${tone}" aria-labelledby="fact-title" aria-roledescription="carousel" data-fact="${esc(fact?.id||'')}"><div class="fact-stack"><div class="fact-content">${iconBlock(art)}<h2 id="fact-title">${esc(title)}</h2>${askOn?`<button type="button" class="ask-pill" data-act="ask-ai" aria-label="${t('askAbout',esc(babyName()))}">${glyph('spark')}${t('askShort')}</button>`:''}<p class="fact-body">${esc(body)}</p><div class="fact-actions">${ref?referenceHTML(ref,true):''}</div></div>${sizers}</div>${nav}</section>`;
+  return S.homeCardHTML=`<section class="card status insight ${tone}" aria-labelledby="fact-title" aria-roledescription="carousel" data-fact="${esc(fact?.id||'')}"><div class="fact-stack"><div class="fact-content">${iconBlock(art)}<h2 id="fact-title">${esc(title)}</h2>${askOn?`<button type="button" class="ask-pill" data-act="ask-ai" aria-label="${t('askAbout',esc(babyName()))}">${glyph('spark')}${t('askShort')}</button>`:''}<p class="fact-body">${esc(body)}</p><div class="fact-actions">${refs}</div></div>${sizers}</div>${nav}</section>`;
+}
+function renderHomeCard(){
+  if(!homeVisible()||S.sheet||S.confirmStop)return;
+  if(factSwipe){factRedraw||='card';return;}
+  if(!S.homeAccessBlocked&&$('[data-fact-outgoing]'))return;
+  const card=$('.insight');
+  if(!card)return;
+  S.homeRenderedMinute=`${todayISO()}:${nowM()}`;
+  const previous=S.homeCardHTML,html=statusCard();
+  if(previous===html)return;
+  const key=keyOf(document.activeElement);
+  card.outerHTML=html;refocus(key);syncFactCarousel();
 }
 function moveFact(direction,swipe=null){
-  const facts=factPool(),index=facts.findIndex(f=>f.id===S.factId);
-  if(facts.length<2)return;
+  const latest=factPool(),facts=(S.renderedFacts||latest).filter(f=>latest.some(item=>item.id===f.id));
+  const index=facts.findIndex(f=>f.id===S.factId);
+  if(facts.length<2){redrawAfterFactPress();return;}
   const outgoing=swipe&&!factMotion.matches?swipe.content.cloneNode(true):null;
   S.factId=facts[(index+direction+facts.length)%facts.length].id;
+  if(outgoing)factSwipeFacts=S.renderedFacts;
   render();
+  factSwipeFacts=null;
   if(outgoing){
     outgoing.setAttribute('aria-hidden','true');outgoing.inert=true;
     outgoing.querySelectorAll('[id]').forEach(el=>el.removeAttribute('id'));
@@ -551,7 +708,7 @@ function moveFact(direction,swipe=null){
     const distance=direction*$('.fact-content').offsetWidth;
     const options={duration:220,easing:'cubic-bezier(0.23, 1, 0.32, 1)'};
     const exit=outgoing.animate([{transform:`translateX(${swipe.offset}px)`},{transform:`translateX(${-distance}px)`}],options);
-    exit.onfinish=exit.oncancel=()=>outgoing.remove();
+    exit.onfinish=exit.oncancel=()=>{outgoing.remove();renderHomeCard();};
     $('.fact-content').animate([{transform:`translateX(${swipe.offset+distance}px)`},{transform:'translateX(0)'}],options);
   }else if(!factMotion.matches)$('.fact-content')?.animate([{opacity:0.3,transform:`translateX(${direction*8}px)`},{opacity:1,transform:'translateX(0)'}],{duration:220,easing:'cubic-bezier(0.77, 0, 0.175, 1)'});
 }
@@ -566,14 +723,15 @@ function resetFactDrag(start){
   start.content.style.transform='';
   if(!factMotion.matches&&offset!=='none')start.content.animate([{transform:offset},{transform:'translateX(0)'}],{duration:160,easing:'cubic-bezier(0.23, 1, 0.32, 1)'});
 }
+const redrawAfterFactPress=()=>{if(factRedraw)requestAnimationFrame(()=>{const pending=factRedraw;factRedraw=false;if(pending==='full')render();else if(pending)renderHomeCard();});};
 function endFactSwipe(ev){
   const start=factSwipe;
   if(!start||ev.pointerId!==start.id)return;
   factSwipe=null;
   const direction=start.content.isConnected?swipeDirection(ev.clientX-start.x,ev.clientY-start.y):0;
-  if(!direction){resetFactDrag(start);syncFactCarousel();return;}
+  if(!direction){resetFactDrag(start);redrawAfterFactPress();syncFactCarousel();return;}
   factSwiped=true;
-  if(factPool().length<2){resetFactDrag(start);return;}
+  if(!start.several){resetFactDrag(start);redrawAfterFactPress();return;}
   factPaused=true;moveFact(direction,start);
 }
 document.addEventListener('pointerdown',ev=>{
@@ -585,14 +743,15 @@ document.addEventListener('pointerdown',ev=>{
   content.getAnimations().forEach(a=>a.cancel());
   card.querySelectorAll('[data-fact-outgoing]').forEach(el=>el.remove());
   content.style.transform=factMotion.matches?'':`translateX(${offset}px)`;
-  factSwipe={id:ev.pointerId,x:ev.clientX,y:ev.clientY,offset,origin:offset,content,card,several:factPool().length>1,horizontal:false};
+  factSwipe={id:ev.pointerId,x:ev.clientX,y:ev.clientY,offset,origin:offset,content,card,several:!!card.querySelector('.fact-navigation'),horizontal:false};
+  syncFactCarousel();
 });
 document.addEventListener('pointermove',ev=>{
   const start=factSwipe;
   if(!start||ev.pointerId!==start.id||!start.content.isConnected)return;
   const dx=ev.clientX-start.x,dy=ev.clientY-start.y;
   if(!start.horizontal){
-    if(Math.abs(dy)>Math.max(6,Math.abs(dx))){factSwipe=null;resetFactDrag(start);return;}
+    if(Math.abs(dy)>Math.max(6,Math.abs(dx))){factSwipe=null;resetFactDrag(start);redrawAfterFactPress();return;}
     if(Math.abs(dx)<=6||Math.abs(dx)<=Math.abs(dy))return;
     start.horizontal=true;start.card.setPointerCapture(ev.pointerId);
     clearTimeout(factTimer);factTimer=null;
@@ -602,12 +761,12 @@ document.addEventListener('pointermove',ev=>{
   start.content.style.transform=`translateX(${start.offset}px)`;
 });
 document.addEventListener('pointerup',endFactSwipe);
-document.addEventListener('pointercancel',ev=>{if(factSwipe?.id===ev.pointerId){const start=factSwipe;factSwipe=null;resetFactDrag(start);syncFactCarousel();}});
+document.addEventListener('pointercancel',ev=>{if(factSwipe?.id===ev.pointerId){const start=factSwipe;factSwipe=null;resetFactDrag(start);redrawAfterFactPress();syncFactCarousel();}});
 document.addEventListener('keydown',()=>{factSwiped=false;},true);
 document.addEventListener('click',ev=>{if(factSwiped){factSwiped=false;ev.stopImmediatePropagation();ev.preventDefault();}},true);
 function syncFactCarousel(){
   const card=$('.insight');
-  const blocked=S.auth!=='ready'||S.tab!=='home'||S.sheet||document.hidden||factPaused||factMotion.matches||factSwipe?.horizontal||!card||factPool().length<2||card.matches(':hover')||card.contains(document.activeElement);
+  const blocked=S.auth!=='ready'||S.tab!=='home'||S.sheet||document.hidden||factPaused||factMotion.matches||factSwipe||!card?.querySelector('.fact-navigation')||card.matches(':hover')||card.contains(document.activeElement);
   if(blocked||factTimerId!==S.factId){clearTimeout(factTimer);factTimer=null;}
   if(blocked)return;
   if(!factTimer){factTimerId=S.factId;factTimer=setTimeout(()=>{factTimer=null;moveFact(1);},7000);}
@@ -615,13 +774,34 @@ function syncFactCarousel(){
 for(const event of ['pointerover','pointerout','focusin','focusout','visibilitychange'])document.addEventListener(event,()=>queueMicrotask(syncFactCarousel));
 factMotion.addEventListener('change',()=>{document.getAnimations().filter(a=>a.id==='ui-enter').forEach(a=>a.cancel());if(S.auth==='ready'&&S.tab==='home')render();syncFactCarousel();});
 function factPool(){
-  const facts=LittleDaysInsights.pool({entries:S.entries,child:S.child,permissions:S.permissions,today:todayISO(),nowMinutes:nowExactM(),lang:S.lang,developmentCards:S.developmentBatch?.cards||[]}),ordered=[];
-  // Keep record summaries and age-based guidance mixed, with a stable order for Previous.
-  while(ordered.length<facts.length)ordered.push(LittleDaysInsights.next(facts,ordered.at(-1)?.id,ordered.map(f=>f.id)));
+  if(S.homeAccessBlocked)return [];
+  const today=todayISO(),nowMinutes=nowExactM(),lang=S.lang,units=unitsOf(),nowEpoch=Date.now();
+  const entries=homeEntries(today);
+  const handoff=Number.isFinite(S.handoffAt)&&S.handoffAt<=nowEpoch?localClock(new Date(S.handoffAt).toISOString()):null;
+  const dutyAt=handoff?isoDay(handoff.date,today)*1440+handoff.hour24*60 + +handoff.minute + (S.handoffAt%60000)/60000:-Infinity;
+  const handoffNote=resourceAllowed('notes')?entries.findLast(e=>e.type==='note'&&e.title==='handoff'&&e.t<=nowMinutes&&homeReads.has(shiftISO(today,dayOf(e.t)))):null;
+  const handoffAt=Math.max(dutyAt,handoffNote?.t??-Infinity);
+  const input={entries,child:S.child,permissions:S.permissions,today,nowMinutes,lang,units,handoffAt,
+    readDates:homeReads,developmentCards:LittleDaysAPI.ai?S.developmentBatch?.cards||[]:[]};
+  const base=LittleDaysInsights.pool({...input,entries:entries.filter(e=>homeReads.has(shiftISO(today,dayOf(e.t))))});
+  const trends=globalThis.LittleDaysPersonalTrends?.pool(input)||[];
+  const other=globalThis.LittleDaysPersonalTrends?base.filter(f=>f.kind==='source'||!['feeds','diapers','sleep'].includes(f.topic)):base;
+  const growth=S.growthEntries.length&&!S.growthError&&globalThis.LittleDaysGrowthInsights?LittleDaysGrowthInsights.cards({
+    ...input,entries:S.growthEntries,unavailable:S.growthUnavailable,chartSex:LittleDaysGrowthInsights.chartSex(S.preferences,S.child?.id)
+  }):[];
+  const guidance=other.filter(f=>f.kind==='source'),personal=[...trends,...growth,...other.filter(f=>f.kind!=='source')];
+  const ordered=[];
+  for(let i=0;i<Math.max(personal.length,guidance.length);i++){
+    if(personal[i])ordered.push(personal[i]);
+    if(guidance[i])ordered.push(guidance[i]);
+  }
   return ordered;
 }
-function currentFact(){const facts=factPool();return facts.find(f=>f.id===S.factId)||chooseFact(facts);}
-function chooseFact(facts=factPool()){const fact=LittleDaysInsights.next(facts,S.factId,S.factRecent);S.factId=fact?.id||'';if(fact)S.factRecent=[...S.factRecent.filter(id=>id!==fact.id),fact.id].slice(-Math.max(1,facts.length-1));return fact;}
+function currentFact(facts){
+  const fact=facts.find(f=>f.id===S.factId)||facts[0];
+  S.factId=fact?.id||'';
+  return fact;
+}
 function referenceHTML(ref,compact=false){
   if(ref.kind==='record'&&validDate(ref.date))return `<button type="button" class="text-link" data-act="fact-log" data-arg="${esc(ref.date)}">${esc(compact?t('factLog'):ref.label)}${compact?glyph('chev'):''}</button>`;
   if(ref.kind==='source'&&/^https:\/\//.test(ref.url||''))return `<a class="text-link" href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer"${compact?' draggable="false"':''}${compact&&ref.label?` aria-label="${esc(`${t('factSource')}: ${ref.label}`)}"`:''}>${esc(compact?t('factSource'):ref.label||t('factSource'))}${compact?glyph('ext'):''}</a>`;
@@ -635,7 +815,7 @@ function focusChat(){const field=$('#ai-question'),finePointer=matchMedia('(poin
 function showNewestTurn(){const th=$('.chat-thread'),turn=th?.lastElementChild;if(turn)th.scrollTop+=turn.getBoundingClientRect().top-th.getBoundingClientRect().top-parseFloat(getComputedStyle(th).paddingTop);}
 function fitChatField(){const field=$('#ai-question');if(!field)return;field.style.height='auto';field.style.height=`${Math.min(field.scrollHeight,132)}px`;}
 // render() hands the old scroll position to the next screen; Home starts at its top, where the pill is.
-function closeChat(){S.tab='home';chooseFact();render();$('[data-scroll]').scrollTop=0;$('[data-act="ask-ai"]')?.focus({preventScroll:true});}
+function closeChat(){S.tab='home';render();refreshHomeEvidence();$('[data-scroll]').scrollTop=0;$('[data-act="ask-ai"]')?.focus({preventScroll:true});}
 async function openChat(){
   if(!LittleDaysAPI.ai)return;
   S.tab='chat';render();focusChat();showNewestTurn();
@@ -1521,13 +1701,25 @@ function settingsSheet(s) {
   const care=S.careData?.exportOptIn?t('careConnected'):t('careNotConnected');
   return sheetShell(t('settings'),`<div class="wrap-settings">
     ${group(t('onDutyRow'),`<div class="line"><strong>${esc(shownName(S.duty))}</strong><button type="button" class="textlink" data-act="duty" aria-label="${t('dutyAria')}">${t('change')}${glyph('chev')}</button></div>`)}
-    ${group(t('baby'),`<div class="row t-plain">${portraitImg}<div><strong>${esc(name)}</strong>${age?`<span class="sub">${age}</span>`:''}</div>${change}</div>${draft}${err}`)}
+    ${group(t('baby'),`<div class="row t-plain">${portraitImg}<div><strong>${esc(name)}</strong>${age?`<span class="sub">${age}</span>`:''}</div>${change}</div>${draft}${err}${growthChartSetting()}`)}
     ${group(t('language'),pick('lang',[['en','English'],['es','Español']],S.lang))}
     ${group(t('unitsL'),pick('units',[['metric','ml'],['us','oz']],unitsOf()))}
     ${group(t('nightL'),nav(`<strong>${t('dimSchedule')}</strong><span class="sub">${dimWord}</span>`,'data-act="night-open"'),'nav')}
     ${nightOpen?`<section class="card settings-card" data-night>${themeRow()}<button type="button" class="chip" data-setting="night" data-focus="setting-night" aria-pressed="${S.night}">${glyph('check')}${t('nightRules')}</button></section>`:''}
     ${LittleDaysAPI.careLink?group(t('careConn'),nav(`<strong class="conn">${S.careData?.exportOptIn?glyph('check'):''}${care}</strong>`,'data-act="open-care"'),'nav'):''}
     <section class="card settings-card"><p class="line">${t('signedInAs')} <strong class="account-name">${esc(shownName(S.me))}</strong></p><button type="button" class="back" data-extra data-shell="logout">${t('logout')}</button></section></div>`,null);
+}
+const canChooseGrowthChart=()=>S.child?.id&&resourceAllowed('children')&&resourceAllowed('weight')&&resourceAllowed('height');
+function growthChartSetting() {
+  if(!canChooseGrowthChart())return '';
+  const es=S.lang==='es', current=LittleDaysGrowthInsights.chartSex(S.preferences,S.child.id);
+  return choiceChips('growth-chart-sex',es?'Tabla de crecimiento de la OMS (opcional)':'WHO growth chart (optional)',
+    [['none',es?'Ninguna':'None'],['girls',es?'Niñas':'Girls'],['boys',es?'Niños':'Boys']],current||'none');
+}
+function saveGrowthChart(sex) {
+  if(!canChooseGrowthChart()||!['girls','boys','none'].includes(sex))return;
+  return persistPreferences({lang:S.lang,units:unitsOf(),palette:S.pal,night:S.night,
+    growthChart:sex==='none'?null:{childId:Number(S.child.id),sex}});
 }
 async function refreshCare() {
   S.careLoading=true;render();
@@ -1615,7 +1807,9 @@ function tempSheet(s) {
 }
 function growthSheet(s) {
   const birth=validDate(S.child?.birthDate)?formLink(t('useBirthDate'),'growth-birth'):'';
-  const body = `${birth}${resourceAllowed('weight','add')?unitField('wu',s.wu,field('weight',t('weight'),s.weight||'','number','min="0" step="any"')):''}${resourceAllowed('height','add')?unitField('lu',s.lu,field('length',t('length'),s.length||'','number','min="0" step="any"')):''}${resourceAllowed('head-circumference','add')?unitField('hu',s.hu,field('head',t('head'),s.head||'','number','min="0" step="any"')):''}${whenFields(s,{dateOnly:true})}${noteBlock(s,field('eventNote',t('note'),s.note||''),s.note||'')}`;
+  const canPair=resourceAllowed('weight','add')&&resourceAllowed('height','add');
+  const recumbent=canPair?`<div class="chips">${chipB('growth-recumbent','',s.recumbent===true,S.lang==='es'?'Peso y longitud medidos juntos, bebé acostado':'Weight and length measured together, baby lying down')}</div>`:'';
+  const body = `${birth}${resourceAllowed('weight','add')?unitField('wu',s.wu,field('weight',t('weight'),s.weight||'','number','min="0" step="any"')):''}${resourceAllowed('height','add')?unitField('lu',s.lu,field('length',t('length'),s.length||'','number','min="0" step="any"')):''}${recumbent}${resourceAllowed('head-circumference','add')?unitField('hu',s.hu,field('head',t('head'),s.head||'','number','min="0" step="any"')):''}${whenFields(s,{dateOnly:true})}${noteBlock(s,field('eventNote',t('note'),s.note||''),s.note||'')}`;
   const on = SAVE_VALIDATORS.growth(s);
   return sheetShell(t('growth'),body,{label:t('save'),on});
 }
@@ -1905,7 +2099,11 @@ function clearPendingToast(id){if(S.toast?.undoId===id){clearTimeout(toastTimer)
 function clearOwnToast(id){if(!S.toast?.pending||S.toast.undoId===id){clearTimeout(toastTimer);S.toast=null;}}
 // A success message clears itself after 4 seconds unless something replaced it.
 function showDone(label){const done=typeof label==='function'?label():label||'';S.message=done;if(done)setTimeout(()=>{if(S.message===done){S.message='';render();}},4000);}
-function localClock(iso){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:LittleDaysZone.get(),year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',hourCycle:'h12'}).formatToParts(new Date(iso)),v=k=>parts.find(p=>p.type===k)?.value||'';return {date:`${v('year')}-${v('month')}-${v('day')}`,hour:String(+v('hour')||12),minute:v('minute'),period:v('dayPeriod')==='PM'?'PM':'AM'};}
+function localClock(iso){
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:LittleDaysZone.get(),year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(iso));
+  const v=k=>parts.find(p=>p.type===k)?.value||'',hour24=+v('hour');
+  return {date:`${v('year')}-${v('month')}-${v('day')}`,hour:String(hour24%12||12),hour24,minute:v('minute'),period:hour24>=12?'PM':'AM'};
+}
 function releasePreview(sheet){if(sheet?.photo?.startsWith?.('blob:'))URL.revokeObjectURL(sheet.photo);if(sheet)sheet.photoFile=null;}
 function releaseDraft(draft){releasePreview(draft);if(draft?.kind==='discard')releaseDraft(draft.draft);}
 function finalOperation(result,label,context={}){
@@ -1926,7 +2124,8 @@ function finalOperation(result,label,context={}){
     if(context.growth)growthChanged();
     if(context.clearToast)clearPendingToast(context.clearToast);
     S.pendingSheetOperation=null;delete S.pendingOps[id];S.message='';
-    announceSaved(result,id,label,context);render();if(S.tab==='log')queueMicrotask(()=>loadTimelineDays(true));return;
+    homeReadAttempts.clear();
+    announceSaved(result,id,label,context);render();queueMicrotask(()=>refreshHomeEvidence(true));if(S.tab==='log')queueMicrotask(()=>loadTimelineDays(true));return;
   }
   if(result.status==='cancelled'){
     S.pendingSheetOperation=null;S.retrySame=null;S.retryAction=null;delete S.pendingOps[id];clearOwnToast(id);clearOperation(context.operationOwner);context.release?.();if(context.onTerminal)context.onTerminal(result);S.message='';render();return;
@@ -2075,7 +2274,15 @@ async function saveOther(s){
 }
 async function saveAppointment(s){return addEntries([{type:'other',what:'appointment',title:s.title.trim(),provider:s.provider||'',location:s.location||'',note:s.note||'',t:startMinutes(s.date,s.hour,s.minute,s.period)}],()=>t('savedItem',t('appointment')));}
 async function saveVisit(s){return addEntries([{type:'note',what:'visit',provider:s.provider||'',reason:s.reason||'',observations:s.observations||'',instructions:s.instructions||'',weightKg:s.weightKg===''?null:+s.weightKg,lengthCm:s.lengthCm===''?null:+s.lengthCm,headCm:s.headCm===''?null:+s.headCm,followUpDate:s.followUpDate||null,t:startMinutes(s.date,s.hour,s.minute,s.period)}],()=>t('savedItem',t('visitRecord')),s.photoFile||null);}
-async function saveGrowth(s){if(!growthDateOk(s))return;const e={type:'growth',note:s.note||'',date:s.timeEdited?s.manualDate:dayISO(0),t:addTime(s)};if(resourceAllowed('weight','add')&&positive(s.weight))e.kg=s.wu==='lb'?+s.weight*OZ_KG*16:+s.weight;if(resourceAllowed('height','add')&&positive(s.length))e.cm=s.lu==='in'?+s.length*2.54:+s.length;if(resourceAllowed('head-circumference','add')&&positive(s.head))e.head=s.hu==='in'?+s.head*2.54:+s.head;if(Object.keys(e).some(k=>['kg','cm','head'].includes(k)))return addEntries([e],()=>t('savedItem',t('growth')),null,{growth:true});}
+async function saveGrowth(s){
+  if(!growthDateOk(s))return;
+  const e={type:'growth',note:s.note||'',date:s.timeEdited?s.manualDate:dayISO(0),t:addTime(s)};
+  if(resourceAllowed('weight','add')&&positive(s.weight))e.kg=s.wu==='lb'?+s.weight*OZ_KG*16:+s.weight;
+  if(resourceAllowed('height','add')&&positive(s.length))e.cm=s.lu==='in'?+s.length*2.54:+s.length;
+  if(resourceAllowed('head-circumference','add')&&positive(s.head))e.head=s.hu==='in'?+s.head*2.54:+s.head;
+  if(e.kg&&e.cm&&s.recumbent===true)e.recumbent=true;
+  if(e.kg||e.cm||e.head)return addEntries([e],()=>t('savedItem',t('growth')),null,{growth:true});
+}
 async function saveReminder(s){const draft=S.sheet,body=reminderPayload(s.recipient,s.what,s.date,s.hour,s.minute,s.period,s.enabled),op=operationFor(s);S.busy=true;S.message='';render();try{const result=await LittleDaysAPI.writes.saveReminder(s.id||null,body,op);await acceptWrite(result,()=>t('reminderLimited'),{sheet:draft,close:true,operationOwner:s});}catch(error){await recoverWrite(error,()=>t('reminderLimited'),{sheet:draft,close:true,operationOwner:s,retry:()=>saveReminder(s)});}finally{S.busy=false;render();}}
 async function saveDuty(s){const draft=S.sheet,op=operationFor(s);S.busy=true;S.message='';render();try{const result=await LittleDaysAPI.writes.saveDuty(s.who,s.note||'',op);await acceptWrite(result,()=>t('savedItem',t('dutyTitle')),{sheet:draft,close:true,operationOwner:s});}catch(error){await recoverWrite(error,()=>t('savedItem',t('dutyTitle')),{sheet:draft,close:true,operationOwner:s,retry:()=>saveDuty(s)});}finally{S.busy=false;render();}}
 async function persistPreferences(values,retry=false){if(S.busy||S.pendingSheetOperation&&!retry)return;const fingerprint=JSON.stringify(values);if(S.preferenceFingerprint!==fingerprint){S.preferenceFingerprint=fingerprint;S.preferenceOperation=null;}S.preferenceOperation||=crypto.randomUUID();S.busy=true;S.message=t('saving');render();const ctx={undoable:false,toast:false,onSaved:()=>{S.preferenceOperation=null;S.preferenceFingerprint='';},onTerminal:()=>{S.preferenceOperation=null;S.preferenceFingerprint='';},retry:()=>persistPreferences(values,true)};try{const result=await LittleDaysAPI.writes.savePreferences({...S.preferences,...values},S.preferenceOperation);await acceptWrite(result,'',ctx);}catch(error){await recoverWrite(error,'',ctx);}finally{S.busy=false;render();}}
@@ -2230,9 +2437,16 @@ function openShortcut(arg){history.replaceState(null,'','#'+arg);S.sheet=arg==='
 // The growth history is out of date: reload it now on Charts, or on the next visit to Charts.
 // A save that is a growth save and also brings a changed measurement calls this twice: one reload covers both.
 let growthReloadQueued=false;
-function growthChanged(){S.growthLoaded=false;if(S.tab!=='charts'||growthReloadQueued)return;growthReloadQueued=true;queueMicrotask(()=>{growthReloadQueued=false;void loadGrowthHistory();});}
+function growthChanged(){
+  S.growthLoaded=false;homeGrowthAt=0;
+  if(growthPending===S.growthRequest)S.growthRequest++;
+  if(S.tab!=='charts'&&!homeVisible()||growthReloadQueued)return;
+  growthReloadQueued=true;
+  queueMicrotask(()=>{growthReloadQueued=false;if(S.tab==='charts')void loadGrowthHistory();else refreshHomeEvidence();});
+}
 // What each tab loads when it opens. Growth history loads on the first visit to Charts; a growth change marks it as not loaded.
 function openedTab(tab){
+  if(tab==='home')refreshHomeEvidence();
   if(tab==='log')void loadTimelineDays();
   if(tab==='charts'){void loadTrendRange();if(!S.growthLoaded)void loadGrowthHistory();}
   if(tab==='photos'){if(S.photoId){S.photoId=null;render();}void loadPhotos();}
@@ -2255,11 +2469,12 @@ function viewAction(a,arg){const s=S.sheet;switch(a){
     case 'remove-photo': if(S.sheet){if(S.sheet.photo?.startsWith?.('blob:'))URL.revokeObjectURL(S.sheet.photo);S.sheet.photo=null;S.sheet.photoFile=null;S.sheet.photoName='';S.sheet.photoRemoved=true;S.sheet.dirty=true;} break;
     case 'shortcut': if(S.sheet?.kind==='discard')break;if(S.sheet&&hasDraft(S.sheet))S.sheet={kind:'discard',draft:S.sheet,after:{type:'shortcut',arg}};else openShortcut(arg);break;
     case 'growth-measure': S.growthMeasure=arg; break;
+    case 'growth-recumbent': if(s?.kind==='growth')Object.assign(s,{recumbent:!s.recumbent,dirty:true});break;
     case 'retry-growth': void loadGrowthHistory(); break;
     case 'chart': S.chart = arg; break;
     case 'photo': pickPhoto(arg); break;
     case 'photos-older': void loadPhotos(true); break;
-    case 'tab': if(arg==='home'&&S.tab!=='home')chooseFact();S.tab = arg;queueMicrotask(()=>openedTab(arg));break;
+    case 'tab': S.tab = arg;queueMicrotask(()=>openedTab(arg));break;
     case 'undo': saveUndo(); return true;
     case 'lang': S.lang = arg; break;
     case 'night': S.night = !S.night; break;
@@ -2288,6 +2503,7 @@ function stopGate(a){
 const BUSY_OK=new Set(['undo','swipe-undo']);
 // Actions that run one function and return its result. A table keeps act() under the complexity limit.
 const CALL_ACTS={
+  'growth-chart-sex':arg=>saveGrowthChart(arg),
   'ask-ai':()=>openChat(),
   'chat-back':()=>closeChat(),
   'ai-retry':arg=>submitChat(+arg),
@@ -2304,7 +2520,13 @@ const CALL_ACTS={
 function factAction(a,arg){
   if(a==='fact-next'||a==='fact-previous'){factPaused=true;moveFact(a==='fact-next'?1:-1);return true;}
   if(a==='fact-pause'){factPaused=!factPaused;render();return true;}
-  if(a==='fact-log'&&validDate(arg)){S.day=Math.min(0,isoDay(arg));S.tab='log';S.search='';S.filter='all';render();void loadTimelineDays(true);return true;}
+  if(a==='fact-log'&&validDate(arg)){
+    const day=Math.min(0,isoDay(arg));
+    S.day=day;S.tab='log';S.search='';S.filter='all';render();
+    const reveal=()=>{if(S.tab==='log'&&S.day===day)$(`[data-day="${day}"]`)?.scrollIntoView({block:'start'});};
+    reveal();void loadDayRange(day-1,day,true).then(reveal);
+    return true;
+  }
   return false;
 }
 function act(a,arg){const s=S.sheet;if(S.busy&&!BUSY_OK.has(a))return;
@@ -2481,6 +2703,9 @@ document.addEventListener('cancel',ev=>{if(ev.target?.type==='file')S.overlayClo
 function render() {
   queueMicrotask(syncFactCarousel);
   if(chartDrag){S.chartDirty=true;return;}
+  if(factSwipe&&S.auth==='ready'&&S.tab==='home'){factRedraw='full';return;}
+  factRedraw=false;
+  if(S.tab==='home')S.homeRenderedMinute=`${todayISO()}:${nowM()}`;
   const hadApp=!!$('#stage .main'), previousEntrances=new Set([...document.querySelectorAll('.bsheet,.overlay .confirm,.toast')].map(el=>el.getAttribute('key')));
   LittleDaysBunny.release();
   syncTheme();
@@ -2599,12 +2824,13 @@ function pollFamily(){
 }
 function tick() {  // reload shared family state while preserving the open form and filters.
   if(S.auth!=='ready'||document.hidden)return;
+  refreshHomeEvidence();
   if(pollFamily())return;
   if (!S.sheet && !S.toast && !chartDrag) render();
 }
 setInterval(tick, 15000);
 setInterval(()=>{if(themeMode()==='auto')syncTheme();},30000);
-document.addEventListener('visibilitychange',()=>{document.documentElement.toggleAttribute('data-page-hidden',document.hidden);LittleDaysBunny.sync();if(document.visibilityState==='visible'){syncTheme();void (pollFamily()||Promise.resolve()).then(()=>{if(S.auth==='ready'&&S.tab==='home'){chooseFact();render();}});}});
+document.addEventListener('visibilitychange',()=>{document.documentElement.toggleAttribute('data-page-hidden',document.hidden);LittleDaysBunny.sync();if(document.visibilityState==='visible'){syncTheme();refreshHomeEvidence();void pollFamily();}});
 function updateCountdowns(){if(document.hidden)return;document.querySelectorAll('[data-countdown]').forEach(e=>{const left=Math.max(0,Math.ceil((+e.dataset.countdown-Date.now())/1000));e.textContent=`${left} s`;if(!left&&e.dataset.kind==='undo')render();});}
 // With a timer running, the day totals count up when the minute changes. Only their text changes, so a field being typed in keeps its focus.
 let totalsMinute=null;

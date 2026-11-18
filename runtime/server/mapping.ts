@@ -334,11 +334,13 @@ function mapTemperatureRecord({ base, row, meta }: RecordContext): Record<string
 }
 
 function mapWeightRecord({ base, row, meta }: RecordContext): Record<string, unknown> {
-  return { ...base, type: 'growth', kg: meta.unit === 'kg' ? row.weight : null, value: row.weight, unit: meta.unit ?? 'unknown' };
+  return { ...base, type: 'growth', kg: meta.unit === 'kg' ? row.weight : null, value: row.weight, unit: meta.unit ?? 'unknown',
+    ...(typeof meta.growthPair === 'string' ? { growthPair: meta.growthPair } : {}) };
 }
 
 function mapHeightRecord({ base, row, meta }: RecordContext): Record<string, unknown> {
-  return { ...base, type: 'growth', cm: meta.unit === 'cm' ? row.height : null, value: row.height, unit: meta.unit ?? 'unknown' };
+  return { ...base, type: 'growth', cm: meta.unit === 'cm' ? row.height : null, value: row.height, unit: meta.unit ?? 'unknown',
+    ...(typeof meta.growthPair === 'string' && meta.recumbent === true ? { growthPair: meta.growthPair, recumbent: true } : {}) };
 }
 
 function mapHeadRecord({ base, row, meta }: RecordContext): Record<string, unknown> {

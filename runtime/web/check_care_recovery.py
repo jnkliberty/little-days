@@ -70,6 +70,7 @@ def manual(page, kind):
     check(kind + ': manual save posts one past interval, not a stop', len(writes) == 1 and writes[0][0] == '/api/events' and event.get('duration') == 60 and event.get('start') == '2026-11-08T14:00:00.000Z')
     check(kind + ': current timer stays active', page.evaluate('S.sleepRun?.id' if kind == 'sleep' else 'S.run?.id') == run['id'])
     if kind == 'feed':
+        page.st['permissions']['resources']['timers'].update(change=False, delete=False)
         page.evaluate("() => {S.permissions.resources.timers.change=false;S.permissions.resources.timers.delete=false;S.sheet=null;act('open-feed');render()}")
         page.locator('[data-feed-adjust] summary').click()
         check('adjustments preserve denied timer permissions while allowing manual entry', page.locator('[data-sheet] [data-act=change-start],[data-sheet] [data-act=wrong-side],[data-sheet] [data-act=switch-earlier],[data-sheet] [data-act=stop]').count() == 0 and page.locator('[data-sheet] [data-act=manual]').is_visible())
