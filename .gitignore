@@ -1,0 +1,9 @@
+__pycache__/
+**/.impeccable/hook.cache.json
+.evidence/
+deploy/household.json
+# install.py writes these in this folder: the settings (with any AI key) and every record. Never commit them.
+.env
+data/
+design/look-match-out/
+design/night-match-out/

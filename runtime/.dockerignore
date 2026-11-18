@@ -1,0 +1,9 @@
+data
+node_modules
+.env
+*.sqlite*
+**/__pycache__
+web/check_*.py
+web/forms_support.py
+web/build.py
+web/README.md

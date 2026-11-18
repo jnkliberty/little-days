@@ -1,0 +1,7 @@
+{
+  "adults": [
+    {"username": "river", "role": "owner"},
+    {"username": "ash", "role": "owner", "label": "Ash"},
+    {"username": "wren", "role": "caregiver", "label": {"en": "Grandma", "es": "Abuelita"}}
+  ]
+}

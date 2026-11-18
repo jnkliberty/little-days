@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  server-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Server tests
+        working-directory: runtime
+        run: npm test
+
+  python-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install and Baby Buddy script tests
+        run: python -m unittest discover -s deploy -p "test*.py"
+      - name: Compose file is valid
+        env:
+          LITTLE_DAYS_ORIGIN: https://localhost
+        run: docker compose config --quiet

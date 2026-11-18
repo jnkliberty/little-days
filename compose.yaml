@@ -1,0 +1,87 @@
+# Little Days: Baby Buddy, the Little Days app, and Caddy for HTTPS. install.py writes .env and runs this file.
+name: little-days
+
+services:
+  babybuddy:
+    image: lscr.io/linuxserver/babybuddy:2.11.0@sha256:bdb8f982509265944a5465d628be3453f8e161e11f54d0814c5b2c7a7918d710
+    environment:
+      PUID: ${LITTLE_DAYS_UID:-1000}
+      PGID: ${LITTLE_DAYS_GID:-1000}
+      TZ: ${TZ:-UTC}
+      CSRF_TRUSTED_ORIGINS: ${LITTLE_DAYS_ORIGIN:?Run install.py first}
+    volumes:
+      - ./data/babybuddy:/config
+      - ./deploy/admin_lockdown.py:/deploy/admin_lockdown.py:ro
+      - ./deploy/bootstrap_household.py:/deploy/bootstrap_household.py:ro
+      - ./deploy/child_tools.py:/deploy/child_tools.py:ro
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 15s
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./runtime
+    user: "${LITTLE_DAYS_UID:-1000}:${LITTLE_DAYS_GID:-1000}"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "18084"
+      LITTLE_DAYS_ORIGIN: ${LITTLE_DAYS_ORIGIN:?Run install.py first}
+      BABYBUDDY_URL: http://babybuddy:8000
+      LITTLE_DAYS_DB: /data/little-days.sqlite
+      LITTLE_DAYS_CREDENTIALS_FILE: /run/secrets/household-credentials.json
+      TZ: ${TZ:-UTC}
+      DATA_DIR: /data
+      # Caddy adds the phone's address to X-Forwarded-For; the passcode count uses the last entry.
+      LITTLE_DAYS_TRUST_PROXY: "true"
+      # AI turns on when you add your own key to .env; with no key it stays off, except for an OpenAI-compatible server on
+      # localhost, which needs no key. Set LITTLE_DAYS_AI_ENABLED=false to keep it off.
+      # The provider is anthropic (default) or openai (any OpenAI-compatible API). Standard ANTHROPIC_API_KEY or OPENAI_API_KEY
+      # settings in your shell are never read.
+      LITTLE_DAYS_AI_ENABLED: ${LITTLE_DAYS_AI_ENABLED:-true}
+      LITTLE_DAYS_AI_PROVIDER: ${LITTLE_DAYS_AI_PROVIDER:-}
+      LITTLE_DAYS_AI_BASE_URL: ${LITTLE_DAYS_AI_BASE_URL:-}
+      LITTLE_DAYS_AI_MODEL: ${LITTLE_DAYS_AI_MODEL:-}
+      LITTLE_DAYS_AI_API_KEY: ${LITTLE_DAYS_AI_API_KEY:-}
+      LITTLE_DAYS_ANTHROPIC_API_KEY: ${LITTLE_DAYS_ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./data/gateway:/data
+      - type: bind
+        source: ./data/babybuddy/little-days-household-access.json
+        target: /run/secrets/household-credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:18084:18084"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18084/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+    depends_on:
+      babybuddy:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    environment:
+      LITTLE_DAYS_HOST: ${LITTLE_DAYS_HOST:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    ports:
+      - "${LITTLE_DAYS_BIND:-127.0.0.1}:${LITTLE_DAYS_HTTPS_PORT:-443}:443"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy-data:

@@ -1,0 +1,5 @@
+# Caddy makes the HTTPS certificate. A public host name gets a Let's Encrypt certificate; localhost and an
+# address on your own network get a certificate from Caddy's own authority (see README.md, "HTTPS").
+{$LITTLE_DAYS_HOST:localhost} {
+	reverse_proxy gateway:18084
+}

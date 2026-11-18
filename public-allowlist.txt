@@ -1,0 +1,36 @@
+# Paths that go into the public Little Days repository. One path on each line.
+# A path that ends in / means every tracked file under it. A line that starts with ! removes a path that an earlier
+# line added. Wave 12 exports exactly the result and nothing else.
+# Left out on purpose: scripts/ (the rename tool), plans/, design/, research/, runtime/reviews/, .impeccable/,
+# .evidence/, AGENTS.md, CLAUDE.md, DESIGN.md, runtime/REVIEW.md, runtime/test/LIVE-SMOKE.md, and the family install
+# files in deploy/ (compose.yaml, README.md, REVIEW.md, backup scripts, the launchd file, set_passcode.sh,
+# profile_permission.py and its test).
+README.md
+LICENSE
+NOTICE
+SECURITY.md
+compose.yaml
+Caddyfile
+.env.example
+.gitignore
+install.py
+reset-passcode.sh
+public-allowlist.txt
+.github/workflows/ci.yml
+docs/screenshots/
+sample/
+deploy/admin_lockdown.py
+deploy/bootstrap_household.py
+deploy/child_tools.py
+deploy/household.example.json
+deploy/test_bootstrap_household.py
+deploy/test_child_tools.py
+deploy/test_install.py
+runtime/.dockerignore
+runtime/.gitignore
+runtime/Dockerfile
+runtime/package.json
+runtime/server/
+runtime/web/
+runtime/test/
+!runtime/test/LIVE-SMOKE.md
