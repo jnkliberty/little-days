@@ -8,9 +8,11 @@ Care confirmations and export sharing have a separate screen under More. The bro
 
 The browser checks use test-only mocked server responses. They verify the client contract; they do not prove writes against Baby Buddy or a running gateway. Do not treat mock test records as persisted family data. Reminder records are schedule preferences only; this UI does not send notifications.
 
-## Growth curves (plan decision D5): shipped without curves
+## Growth curves (plan decision D5): shipped without WHO tables
 
-The Growth card draws the measurements and no reference curves. This is the plan's fallback: "If the terms block reuse, the wave ships with no curves."
+Current state (2026-11-21): the Growth card draws the child's measurements with no reference curves. `growth-insights.js` builds Recorded weight and Recorded length cards from the child's own records and carries no WHO percentile tables. No "WHO growth chart" setting appears in Settings.
+
+The plan's fallback was: "If the terms block reuse, the wave ships with no curves."
 
 Terms check, read on 2026-11-11 (sources: who.int/about/policies/publishing/copyright and who.int/about/policies/terms-of-use):
 
@@ -19,4 +21,4 @@ Terms check, read on 2026-11-11 (sources: who.int/about/policies/publishing/copy
 - The growth standards pages carry no licence statement for the percentile tables, which WHO offers as PDF and Excel files only.
 - A non-commercial, share-alike licence does not fit an MIT public repository, so no WHO table is committed here.
 
-No WHO data file is in this repository, and there is no "growth chart" setting yet. To add curves later: get written permission from WHO (permissions form: who.int/about/policies/publishing/permissions), record its wording here, then add the optional "growth chart" setting (girl, boy, not set) and the data file in one change.
+To add curves or percentile bands later: get written permission from WHO (permissions form: who.int/about/policies/publishing/permissions), record its wording here and in `NOTICE`, then add the optional growth chart setting and the data table in one change.

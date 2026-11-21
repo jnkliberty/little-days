@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import { HttpError } from './http.ts';
 import { eventTimestamp, instant, localMidnight, mapBabyBuddyRecord, mapEvent, localDate, relativeMinutes, type MappedEvent, type MappedWrite } from './mapping.ts';
 import type { SessionService } from './session.ts';
+import { findConflicts, overlapError } from './sleep-overlap.ts';
 import type { Operation, Store } from './store.ts';
 
 type Session = { sessionId: string; csrfToken: string; adult: string };
@@ -383,7 +385,7 @@ async function recoverUpdateOperation(store: Store, sessions: Sessions, session:
     try {
       row = await sessions.request(session.sessionId, { resource: parsed.resource, method: 'PATCH', id: parsed.id, body: write.body });
     } catch (error) {
-      if (knownFailure(status(error))) { store.finishOperation(operation.id, 'failed'); throw periodError(error); }
+      if (knownFailure(status(error))) { store.finishOperation(operation.id, 'failed'); throw await periodRefusal(sessions, session, error, parsed.resource, write.body, `${parsed.resource}:${parsed.id}`); }
       return operationResult(store.getOperation(operation.id)!);
     }
     if (!isRecord(row) || childIdOf(row) !== config.id || !matchesWrite(write.body, row)) return operationResult(store.getOperation(operation.id)!);
@@ -514,7 +516,8 @@ function childView(row: Record<string, unknown>, dueDate: string | null) {
   return {
     id: row.id, slug: row.slug, name,
     birthDate: row.birth_date, birthTime: row.birth_time || null, dueDate,
-    portrait: row.picture ? '/api/child/portrait' : null,
+    // The version tag changes with each new picture, so a phone never shows the last photo from its cache.
+    portrait: row.picture ? `/api/child/portrait?v=${createHash('sha256').update(String(row.picture)).digest('hex').slice(0, 12)}` : null,
   };
 }
 
@@ -552,6 +555,16 @@ function canKeepOverlapLocal(mapped: MappedEvent): boolean {
 
 function periodError(error: unknown): unknown {
   return isOverlap(error) ? new HttpError(400, 'This time overlaps another entry. Change the start or end.') : error;
+}
+
+// A refused period save is an overlap when a saved entry of the same kind crosses it. The saved list decides, not Baby
+// Buddy's refusal text, which follows the account language. A sleep overlap names the saved sleeps it crosses.
+// Returns the error to show: a different object than `error` only when the refusal is an overlap.
+async function periodRefusal(sessions: Sessions, session: Session, error: unknown, resource: string, body: unknown, exclude?: string): Promise<unknown> {
+  if (status(error) !== 400 || !PERIOD_RESOURCES.has(resource) || !isRecord(body) || typeof body.start !== 'string' || typeof body.end !== 'string') return periodError(error);
+  const conflicts = await findConflicts(input => sessions.request(session.sessionId, input as Request), resource, Number(body.child), body.start, body.end, exclude);
+  if (!conflicts?.length) return periodError(error);
+  return resource === 'sleep' ? overlapError(conflicts) : new HttpError(400, 'This time overlaps another entry. Change the start or end.');
 }
 
 function samePeriod(row: unknown, expected: Record<string, unknown>): boolean {
@@ -911,7 +924,7 @@ export function createRecords({ store, sessions, now = () => new Date() }: { sto
       store.finishOperation(operationId, 'saved', id);
       return { status: 'saved', id };
     } catch (error) {
-      if (knownFailure(status(error))) { store.finishOperation(operationId, 'failed'); throw periodError(error); }
+      if (knownFailure(status(error))) { store.finishOperation(operationId, 'failed'); throw await periodRefusal(sessions, session, error, parsed.resource, write.body, id); }
       return { status: 'pending', pendingOperation: operationId };
     }
   }
@@ -956,10 +969,11 @@ export function createRecords({ store, sessions, now = () => new Date() }: { sto
       return finishSplit(store, operation, second);
     } catch (error) {
       if (!knownFailure(status(error))) return operationResult(store.getOperation(operation.id)!);
-      writeMetadata(store, operation, { error: (periodError(error) as Error).message });
+      const refusal = shortened ? await periodRefusal(sessions, session, error, 'sleep', input.write.body) : periodError(error);
+      writeMetadata(store, operation, { error: (refusal as Error).message });
       if (shortened) return recoverSplit(store, sessions, session, store.getOperation(operation.id)!, now());
       failSplit(store, store.getOperation(operation.id)!);
-      throw periodError(error);
+      throw refusal;
     }
   }
 
@@ -1041,8 +1055,12 @@ export function createRecords({ store, sessions, now = () => new Date() }: { sto
       store.updateUnresolvedOperationMetadata(operationId, metadata.map((value, position) => position === index ? { ...savedMeta, attempted: true } : value));
       try { row = await request(session, { resource: item.resource, method: 'POST', body: item.body }); }
       catch (error) {
-        if (isOverlap(error) && ids.length === 0 && canKeepOverlapLocal(mapped)) return overlapFallback(session, operationId, event, childId, current);
-        if (knownFailure(status(error)) && ids.length === 0) { store.finishOperation(operationId, 'failed'); throw periodError(error); }
+        if (knownFailure(status(error)) && ids.length === 0) {
+          const refusal = await periodRefusal(sessions, session, error, item.resource, item.body);
+          if (refusal !== error && canKeepOverlapLocal(mapped)) return overlapFallback(session, operationId, event, childId, current);
+          store.finishOperation(operationId, 'failed');
+          throw refusal;
+        }
         if (knownFailure(status(error)) && ids.length > 0) store.finishOperation(operationId, 'finishing', undefined, ids);
         return { status: 'pending', pendingOperation: operationId };
       }

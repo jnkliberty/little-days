@@ -71,6 +71,7 @@ test('HTTP boundary requires session, same origin and CSRF, and sets a private c
     assert.equal((await fetch(base + '/package.json')).status, 404);
     const page = await fetch(base + '/');
     assert.ok(page.headers.get('content-security-policy')?.includes("frame-ancestors 'none'"));
+    assert.ok(page.headers.get('content-security-policy')?.includes("media-src 'self' blob:"));
     await fetch(base + '/api/session', {method: 'DELETE', headers: {...headers, 'x-csrf-token': 'write-csrf'}});
     assert.equal((await fetch(base + '/api/state', {headers})).status, 401);
   } finally {

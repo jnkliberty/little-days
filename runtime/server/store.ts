@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { addCryColumns, createCryStore } from './cries-store.ts';
 
 export type SessionInput = {
   sessionId: string;
@@ -121,12 +122,30 @@ export function openStore(path: string) {
       occurred_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS app_events_occurred_at_idx ON app_events(occurred_at);
+    -- The cries of the Crying button. A cry is not an app event: no event route can reach it.
+    CREATE TABLE IF NOT EXISTS cries (
+      id TEXT PRIMARY KEY,
+      adult TEXT,
+      occurred_at TEXT NOT NULL,
+      sound_on INTEGER NOT NULL DEFAULT 0,
+      snapshot_json TEXT,
+      stopped_by TEXT,
+      labeled_at TEXT,
+      labeled_by TEXT,
+      skipped INTEGER NOT NULL DEFAULT 0,
+      clip_state TEXT NOT NULL DEFAULT 'none' CHECK (clip_state IN ('none','kept','deleted','closed')),
+      clip BLOB,
+      clip_json TEXT,
+      noisy INTEGER NOT NULL DEFAULT 0,
+      deleted_at TEXT
+    );
   `);
   const operationColumns = db.prepare('PRAGMA table_info(operations)').all() as { name: string }[];
   if (!operationColumns.some(column => column.name === 'babybuddy_ids_json')) {
     db.exec("ALTER TABLE operations ADD COLUMN babybuddy_ids_json TEXT NOT NULL DEFAULT '[]'");
     db.exec("UPDATE operations SET babybuddy_ids_json = json_array(babybuddy_id) WHERE babybuddy_id IS NOT NULL");
   }
+  addCryColumns(db);
 
   function decodeOperation(row: Record<string, unknown> | undefined): Operation | null {
     if (!row) return null;
@@ -141,6 +160,7 @@ export function openStore(path: string) {
   }
 
   return {
+    cries: createCryStore(db),
     createSession(input: SessionInput): void {
       db.prepare('INSERT INTO sessions (id_hash, csrf_hash, adult, babybuddy_user_id, expires_at) VALUES (?, ?, ?, ?, ?)')
         .run(hashSecret(input.sessionId), hashSecret(input.csrfToken), input.adult, input.babyBuddyUserId, input.expiresAt);

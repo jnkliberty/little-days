@@ -84,5 +84,106 @@ globalThis.LittleDaysCharts = (() => {
     return svg(w, h, label, out);
   }
 
-  return {columns, rhythm, growth, scale};
+  // Home card graphs (owner, 2026-11-18: the text cards should be "better visual and easier to understand").
+  // They draw marks only; the app puts the labels under them as page text, so labels stay 14 px at any card width.
+  // mini: one column per day. Past days are outlined, today is solid.
+  // bars = [{value, today}], usual = a value or null, floor = the smallest half-scale in the unit (2 for counts, 0 for durations).
+  // With no usual level (null, the today card), columns stand on zero. A usual of 0 is still a usual level.
+  // With a usual level, each column runs from the dashed usual line up (more) or down (less) (owner, 2026-11-19).
+  function mini(bars, usual, label, floor = 0) {
+    return usual != null ? fromUsual(bars, usual, label, floor) : fromZero(bars, label);
+  }
+  // Past columns are outlined with the card color inside, so the dashed line never shows through them; today is solid.
+  const column = (b, x, bw, y0, y1, extra = '') => b.today ? `<rect class="today${extra}" x="${x}" y="${y0}" width="${bw}" height="${y1 - y0}" rx="3"/>`
+    : `<rect class="past${extra}" x="${x + 1}" y="${y0 + 1}" width="${bw - 2}" height="${Math.max(0, y1 - y0 - 2)}" rx="2" vector-effect="non-scaling-stroke"/>`;
+  function fromZero(bars, label) {
+    const w = 280, ph = 48, n = bars.length, band = w / n, bw = Math.min(n > 2 ? 24 : 48, band - 8);
+    const top = 1.2 * Math.max(...bars.map(b => b.value)) || 1, Y = v => ph - ph * v / top;
+    let out = `<line class="base" x1="0" x2="${w}" y1="${ph}" y2="${ph}" vector-effect="non-scaling-stroke"/>`;
+    // A positive value is at least 8 units tall on the base line, so a small past day keeps its outline (review, 2026-11-19).
+    bars.forEach((b, i) => { if (b.value) out += column(b, i * band + (band - bw) / 2, bw, Math.min(Y(b.value), ph - 8), ph); });
+    return svg(w, ph, label, out);
+  }
+  // Half the plot is one half-scale: max(largest difference, 10 percent of usual, unit floor), so a small difference never looks dramatic.
+  // A day that differs from usual is at least 8 units tall in its direction. A day equal to usual is an 8-unit box centered on the line
+  // (outlined for a past day, solid for today). A day with no record (value null) draws nothing; a recorded 0 draws. There is no zero line (review, 2026-11-19).
+  // 48 units tall (was 64), so the Home card fits 264 px at 390 px (card mix, owner, 2026-11-19).
+  const MINI_H = 48;
+  function fromUsual(bars, usual, label, floor) {
+    const w = 280, mid = MINI_H / 2, n = bars.length, band = w / n, bw = Math.min(24, band - 8);
+    const half = Math.max(...bars.filter(b => b.value != null).map(b => Math.abs(b.value - usual)), 0.1 * usual, floor) || 1, k = (mid - 1) / half;
+    // The line goes first, so every box sits on top of it.
+    let out = `<line class="usual" x1="0" x2="${w}" y1="${mid}" y2="${mid}" vector-effect="non-scaling-stroke"/>`;
+    bars.forEach((b, i) => {
+      if (b.value == null) return;
+      const x = i * band + (band - bw) / 2, d = b.value - usual;
+      if (Math.abs(d) < 0.5) { out += column(b, x, bw, mid - 4, mid + 4, ' same'); return; }
+      const y = mid - Math.sign(d) * Math.max(8, Math.abs(d) * k);
+      out += column(b, x, bw, Math.min(y, mid), Math.max(y, mid));
+    });
+    return svg(w, MINI_H, label, out);
+  }
+
+  // dayline: today's feeds from midnight to midnight. Each bottle is a thin bar at its time, as tall as its mL; a bottle with
+  // no amount is a short hollow bar. Nursing sessions are dots in a band under the base line, so a dot never hides under a bar.
+  // A gray line marks now. marks = [{t (minutes after midnight), ml (or null), nurse, shown}]. DAYLINE_PAD is the side inset, as a share of the width.
+  // The app writes each bottle's number above its bar as page text, at the place daylineLabels gives.
+  // Card mix (owner, 2026-11-19): 40 units tall (was 76). Bars 2 to 20 units, room 12 above the tallest for its number, nursing dots r 3.
+  const DAYLINE_PAD = 10 / 280, DL = {w:280, h:40, base:32, room:12, hollow:6, bar:6, dot:37, r:3};
+  const dlX = m => DL.w * DAYLINE_PAD + DL.w * (1 - 2 * DAYLINE_PAD) * Math.max(0, Math.min(1440, m)) / 1440;
+  // A measured bottle maps linearly onto 2 to 34 units (2 + 32 x mL / largest), so a larger amount is always a taller bar.
+  // Bars go left to right by time; each center is at least bar width + 1 units right of the one before, and a run that would
+  // pass the now line shifts left to end there, so no bar is ever drawn after now (owner, 2026-11-19). Numbers use the moved centers.
+  // Whole bars stay inside: centers run from midnight + half a bar to now - half a bar (Codex r1, 2026-11-19). When the bars
+  // do not fit there at that spacing (just after midnight, or about 40 bottles), the spacing shrinks evenly to fit; bars may
+  // then touch. In the first 33 minutes the space is narrower than one bar, so the bars start at midnight and may reach past now.
+  function dlBars(marks, now = 1440) {
+    const bottles = marks.filter(m => !m.nurse), most = Math.max(0, ...bottles.map(m => m.ml || 0)) || 1;
+    const lo = dlX(0) + DL.bar / 2, hi = Math.max(lo, dlX(now) - DL.bar / 2);
+    const step = bottles.length > 1 ? Math.min(DL.bar + 1, (hi - lo) / (bottles.length - 1)) : DL.bar + 1;
+    const tall = DL.base - DL.room - 2;
+    const bars = bottles.map(m => ({...m, x:Math.max(lo, dlX(m.t)), top:DL.base - (m.ml ? 2 + tall * m.ml / most : DL.hollow)})).sort((a, b) => a.t - b.t);
+    bars.forEach((b, i) => { if (i) b.x = Math.max(b.x, bars[i - 1].x + step); });
+    for (let i = bars.length - 1; i >= 0; i--) bars[i].x = Math.min(bars[i].x, i === bars.length - 1 ? hi : bars[i + 1].x - step);
+    return bars;
+  }
+  function dayline(marks, now, label) {
+    const {w, h, base, bar, dot, r} = DL;
+    let out = `<line class="base" x1="${dlX(0)}" x2="${dlX(1440)}" y1="${base}" y2="${base}" vector-effect="non-scaling-stroke"/>`
+      + `<line class="now-tick" x1="${dlX(now)}" x2="${dlX(now)}" y1="2" y2="${h - 1}" vector-effect="non-scaling-stroke"/>`;
+    for (const m of marks.filter(m => m.nurse)) out += `<circle class="nurse" cx="${dlX(m.t)}" cy="${dot}" r="${r}"/>`;
+    // Taller bars first, so a short bar close in time is drawn over a tall one, never hidden under it.
+    for (const b of dlBars(marks, now).sort((a, z) => a.top - z.top)) {
+      out += b.ml ? `<rect class="bottle" x="${b.x - bar / 2}" y="${b.top}" width="${bar}" height="${base - b.top}" rx="1"/>`
+        : `<rect class="bottle hollow" x="${b.x - bar / 2 + 0.75}" y="${b.top + 0.75}" width="${bar - 1.5}" height="${base - b.top - 1.5}" rx="1"/>`;
+    }
+    return svg(w, h, label, out);
+  }
+  // Number places as shares of the drawing (0 to 1): x is the center, y is the bottom of the number.
+  // A number is skipped when its center is closer to the last number shown than 6 + 9 x the longer label's characters.
+  const labelGap = (a, b) => 6 + 9 * Math.max(String(a).length, String(b).length);
+  function daylineLabels(marks, now) {
+    let last = null;
+    return dlBars(marks, now).sort((a, b) => a.x - b.x).filter(b => (!last || b.x - last.x >= labelGap(last.shown, b.shown)) && (last = b, true))
+      .map(b => ({x:b.x / DL.w, y:(b.top - 1) / DL.h, text:b.shown, hollow:!b.ml}));
+  }
+
+  // Last 7 days: 7 small solid columns from zero for one care row (at 8 px wide an outlined column reads as a "0").
+  // The row is wider than 84 units on most phones, so the drawing stretches to its box (preserveAspectRatio none).
+  function week(values, w = 84, H = 18) {
+    const n = values.length, band = w / n, bw = band - 4, top = Math.max(0, ...values.filter(Number.isFinite)) || 1;
+    let out = `<line class="base" x1="0" x2="${w}" y1="${H}" y2="${H}" vector-effect="non-scaling-stroke"/>`;
+    values.forEach((v, i) => { if (v > 0) { const y = Math.min(H - (H - 2) * v / top, H - 6); out += `<rect class="bar" x="${i * band + 2}" y="${y}" width="${bw}" height="${H - y}" rx="2"/>`; } });
+    return `<svg width="${w}" height="${H}" viewBox="0 0 ${w} ${H}" preserveAspectRatio="none" aria-hidden="true" focusable="false">${out}</svg>`;
+  }
+  // Recorded weight or length: a line through every record; past records outlined, the latest solid. points = [{d (days), v}].
+  function growthLine(points, label, H = 40) {
+    const w = 280, pad = 6, values = points.map(p => p.v), lo = Math.min(...values), span = (Math.max(...values) - lo) || 1;
+    const d0 = points[0].d, d1 = points.at(-1).d, X = d => pad + (w - 2 * pad) * (d - d0) / ((d1 - d0) || 1), Y = v => H - pad - (H - 2 * pad) * (v - lo) / span;
+    let out = `<path class="trend" d="M${points.map(p => `${X(p.d)} ${Y(p.v)}`).join('L')}" vector-effect="non-scaling-stroke"/>`;
+    out += points.map((p, i) => `<circle class="${i === points.length - 1 ? 'today' : 'past'}" cx="${X(p.d)}" cy="${Y(p.v)}" r="4.5" vector-effect="non-scaling-stroke"/>`).join('');
+    return svg(w, H, label, out);
+  }
+
+  return {columns, rhythm, growth, scale, mini, dayline, daylineLabels, labelGap, DAYLINE_PAD, week, growthLine};
 })();

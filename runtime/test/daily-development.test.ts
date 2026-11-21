@@ -177,13 +177,17 @@ test('a repeated next-day claim or a provider failure cannot label yesterday’s
   try {
     const ai=createAI(f.options);await ai.dailyDevelopment(session);
     f.setDate('2026-11-09T06:00:00Z');
-    assert.deepEqual(await ai.dailyDevelopment(session),{date:'2026-11-09',status:'unavailable',cards:[]});
+    // Yesterday's cards still come back as earlier cards, each with its own date; none is labeled as today's.
+    const repeated=await ai.dailyDevelopment(session);
+    assert.equal(repeated.status,'unavailable');assert.equal(repeated.date,'2026-11-09');
+    assert.ok(repeated.cards.length&&repeated.cards.every(card=>card.date==='2026-11-08'));
     assert.equal(f.calls.length,4);
     await ai.dailyDevelopment(session);assert.equal(f.calls.length,4);
     f.setDate('2026-11-09T06:16:00Z');f.setOutput(output(3));
     assert.equal((await ai.dailyDevelopment(session)).status,'ready');assert.equal(f.calls.length,6);
     f.setDate('2026-11-10T06:00:00Z');f.setFail();
-    assert.deepEqual(await ai.dailyDevelopment(session),{date:'2026-11-10',status:'unavailable',cards:[]});
+    const failed=await ai.dailyDevelopment(session);
+    assert.equal(failed.status,'unavailable');assert.ok(failed.cards.every(card=>card.date<'2026-11-10'));
   } finally{f.store.close();}
 });
 
@@ -236,6 +240,35 @@ test('a prior-day success preserves today’s failed-request cooldown', async ()
     assert.equal(f.calls.length,calls,'another adult must not start paid research during the cooldown');
     assert.equal((await retry).status,'unavailable');
   } finally {f.store.close();}
+});
+
+test('card mix: the reply adds the stored cards of the 6 days before today, newest first, with no extra AI call', async () => {
+  const f=fixture();
+  const put=f.store.putSetting;let key='';
+  f.store.putSetting=(scope,name,value)=>{key=name;put(scope,name,value);};
+  try {
+    const ai=createAI(f.options),first=await ai.dailyDevelopment(session);
+    // Stored days 1 to 8 before 2026-11-08: only the days 1 to 6 before come back.
+    const batches=Array.from({length:8},(_,index)=>{const date=new Date(Date.UTC(2026,10,7-index)).toISOString().slice(0,10);
+      return {date,cards:first.cards.map((card,offset)=>({...card,id:`daily-${date}-${offset+1}`,date}))};}).reverse();
+    put('app',key,{batches:[...batches,{date:'2026-11-08',cards:first.cards}]});
+    const calls=f.calls.length,reply=await ai.dailyDevelopment(session);
+    assert.equal(f.calls.length,calls,'earlier days come from storage');
+    assert.equal(reply.status,'ready');
+    assert.deepEqual(reply.cards.slice(0,3),first.cards,'today first');
+    assert.deepEqual([...new Set(reply.cards.slice(3).map(card=>card.date))],['2026-11-07','2026-11-06','2026-11-05','2026-11-04','2026-11-03','2026-11-02']);
+    // Without today's batch and with no AI, the earlier days still come back.
+    put('app',key,{batches});
+    const offline=await createAI({...f.options,env:{}}).dailyDevelopment(session);
+    assert.equal(offline.status,'unavailable');assert.equal(offline.cards.length,18);
+    put('app',key,{batches:[...batches,{date:'2026-11-08',cards:first.cards}]});
+    // Review r1 (2026-11-19): Ask keeps today's daily facts only. The earlier days go to Home, never into the Ask context
+    // (18 more facts can push the request past its size limit, HTTP 413).
+    await ai.chat(session,{question:'Tell me more',lang:'en'});
+    const asked=JSON.stringify(f.calls.at(-1));
+    assert.ok(asked.includes(first.cards[0].id),'today’s fact is in the Ask context');
+    assert.ok(!asked.includes('daily-2026-11-07-1'),'an earlier day is not in the Ask context');
+  } finally{f.store.close();}
 });
 
 test('thirty days of maximum-length history leaves room for the next day’s sources', async () => {
@@ -326,4 +359,37 @@ test('daily development calls no provider with an OpenAI-compatible provider, an
     assert.equal(ai.status().available,true);
     assert.equal(ai.status().dailyDevelopment,false);
   } finally{f.store.close();}
+});
+
+// 2026-11-20: after midnight the family gateway logged "daily development failed: TimeoutError". The reply waited for
+// today's provider calls (up to 2 x 25 s) before it sent the stored facts, so Home showed only graph cards meanwhile.
+test('a slow new day does not hold back the stored facts of the 6 days before', async () => {
+  const {createDevelopment}=await import('../server/development.ts');
+  const {createHash}=await import('node:crypto');
+  const store=openStore(':memory:');
+  const state={child:{id:1,birthDate:'2026-10-01'},permissions:{resources:{children:{view:true}}}};
+  const key='development_'+createHash('sha256').update('1:2026-10-01').digest('hex').slice(0,24);
+  const days=['2026-11-14','2026-11-15','2026-11-16','2026-11-17','2026-11-18','2026-11-19'];
+  store.putSetting('app',key,{batches:days.map(date=>({date,cards:[1,2,3].map(n=>({id:`daily-${date}-${n}`,date,topic:[`t-${date}-${n}`,`t-${date}-${n}`],body:[`Fact ${date} ${n}.`,`Dato ${date} ${n}.`]}))}))});
+  let release=()=>{},calls=0;
+  const hung=new Promise<never>((_,reject)=>{release=()=>{const error=new Error('slow');error.name='TimeoutError';reject(error);};});
+  const service=createDevelopment({store,env,available:true,now:()=>new Date('2026-11-20T06:03:00Z'),wait:20,fetch:(()=>{calls++;return hung;}) as any});
+  const write=process.stderr.write;process.stderr.write=(()=>true) as any;
+  try {
+    let guard:ReturnType<typeof setTimeout>|undefined;
+    const reply=await Promise.race([service.generate(state),new Promise(resolve=>{guard=setTimeout(()=>resolve('waited for the provider'),1000);})]).finally(()=>clearTimeout(guard));
+    assert.notEqual(reply,'waited for the provider','the stored facts come back before the provider answers');
+    assert.equal((reply as any).status,'pending');
+    assert.equal((reply as any).date,'2026-11-20');
+    assert.equal((reply as any).cards.length,18);
+    assert.equal((reply as any).cards[0].date,'2026-11-19','newest earlier day first');
+    // The next request joins the same work: one provider call, not a second one.
+    const again=await service.generate(state);
+    assert.equal(again.status,'pending');assert.equal(again.cards.length,18);assert.equal(calls,1);
+    release();
+    // When the work fails, the reply still carries the stored days, and no new call starts within 15 minutes.
+    await new Promise(resolve=>setTimeout(resolve,50));
+    const failed=await service.generate(state);
+    assert.equal(failed.status,'unavailable');assert.equal(failed.cards.length,18);assert.equal(calls,1);
+  } finally{release();process.stderr.write=write;store.close();}
 });

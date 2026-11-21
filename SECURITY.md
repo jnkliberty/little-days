@@ -4,7 +4,7 @@ Little Days keeps a baby's care records, so a mistake here matters. Please repor
 
 ## Report a problem
 
-Send the details to `<SECURITY CONTACT>` or use GitHub's "Report a vulnerability" button on this repository. Do not open a public issue for a security problem. Say what you did, what you expected, and what happened. The maintainer replies as soon as possible.
+Use GitHub's "Report a vulnerability" button on this repository. Do not open a public issue for a security problem. Say what you did, what you expected, and what happened. The maintainer replies as soon as possible.
 
 ## What the app protects
 
@@ -13,11 +13,12 @@ Send the details to `<SECURITY CONTACT>` or use GitHub's "Report a vulnerability
 - **Sign-in.** An adult's Baby Buddy password is made by the install, stored only in `data/babybuddy/`, and never shown to a phone. Baby Buddy locks an account after repeated wrong passwords.
 - **The default Baby Buddy administrator.** `install.py` disables the `admin` account and checks that its default password no longer works before it goes on.
 - **HTTPS.** The app refuses to start with an address that does not start with `https://`.
-- **AI is off by default.** With AI off the app makes no call to any AI provider.
+- **AI is off until you add a key.** With no key, the app makes no call to an outside AI provider. A local OpenAI-compatible server (`localhost`) needs no key. `LITTLE_DAYS_AI_ENABLED=false` keeps AI off.
+- **Cry audio clips are opt-in and local.** Recording stays off until an adult turns it on in Settings. Clips stay only on your own computer in `data/` (at most 400 clips), never go to an outside service, and can be deleted in Settings.
 
 ## What you must do
 
-- Keep `.env` and `data/` private. They hold the AI key (if you add one), the Baby Buddy account passwords, and every record. Back them up to a place only you can read.
+- Keep `.env` and `data/` private. They hold the AI key (if you add one), the Baby Buddy account passwords, every record, and any cry audio clips you choose to record. Back them up to a place only you can read.
 - Choose a passcode that is not used elsewhere. Reset it with `./reset-passcode.sh` when an adult leaves the household.
 - Keep the app on a private network, or behind a host name you control. Anyone who knows the passcode and an adult's sign-in name can open the records.
 - Update the images from time to time: `git pull`, then `docker compose build gateway` and `docker compose up -d`.

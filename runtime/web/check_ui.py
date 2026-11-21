@@ -355,7 +355,7 @@ def audit_long_responsive_timeline(page, loaded):
         nav=page.evaluate("""() => {const sc=document.querySelector('[data-scroll]'),b=document.querySelector('.screen-top [data-arg=home]'),r=b.getBoundingClientRect();return {overflow:document.documentElement.scrollWidth>innerWidth,scrolls:sc.scrollHeight>sc.clientHeight,visible:r.width>=44&&r.height>=44&&r.top>=0&&r.bottom<=innerHeight}}""")
         check(f"{width}px long timeline scrolls while Home remains reachable",not nav["overflow"] and nav["scrolls"] and nav["visible"])
         navigate(page, "home")
-        assert page.locator(".nav button").count() == 5
+        assert page.locator("nav.nav button").count() == 5
         navigate(page, "log")
 
 
@@ -363,13 +363,13 @@ def audit_responsive_shell(page, width, height, evidence):
     page.set_viewport_size({"width":width,"height":height})
     metrics=page.evaluate("""() => {const app=document.querySelector('.app.phone'),home=document.querySelector('.wrap'),a=app.getBoundingClientRect();return {doc:document.documentElement.scrollWidth,view:innerWidth,appWidth:a.width,columns:getComputedStyle(home).gridTemplateColumns.split(' ').length,appBottom:a.bottom,viewBottom:innerHeight}}""")
     reachable=True
-    for button in page.locator(".nav button").all():
+    for button in page.locator("nav.nav button").all():
         button.scroll_into_view_if_needed()
         r=button.bounding_box()
         reachable=reachable and r["width"]>=44 and r["height"]>=44 and r["y"]>=0 and r["y"]+r["height"]<=height+1
     check(f"{width}px shell has one column capped at 480px and five reachable nav rows",
           metrics["appWidth"]==min(width,480) and metrics["columns"]==1 and metrics["doc"]<=metrics["view"]
-          and metrics["appBottom"]<=metrics["viewBottom"]+1 and page.locator(".nav button").count()==5 and reachable)
+          and metrics["appBottom"]<=metrics["viewBottom"]+1 and page.locator("nav.nav button").count()==5 and reachable)
     page.screenshot(path=str(evidence/f"after-{width}.png"))
     open_settings(page)
     panel=page.locator(".settings-card").first.bounding_box()
@@ -548,12 +548,20 @@ def audit_day_totals(browser, base):
         page.st["entries"] = day_totals_entries()
         page.reload()
         page.locator('.tile[data-act="open-feed"]').wait_for()
-        feed, sleep = day_total_text(page, '[data-day-total="feed"]'), day_total_text(page, '[data-day-total="sleep"]')
-        check(f"{lang} Home Feed card shows feeds, nursing time and bottle volume of the calendar day: {feed}", feed == want["feed"])
-        check(f"{lang} Home Sleep card counts a sleep across midnight and across 7 AM by calendar day: {sleep}", sleep == want["sleep"])
-        check(f"{lang} Home shows the diaper counts once", day_total_text(page, ".total.t-dia dd") == want["diaper"] and page.get_by_text("Wet 2").count() + page.get_by_text("Pipí 2").count() == 1)
+        # Owner, 2026-11-21: Today moved off Home; Latest carries the "See the timeline" link and Timeline owns the daily totals.
+        home_check = page.evaluate("""() => {
+            const link = document.querySelector('.wrap [data-act="tab"][data-arg="log"]');
+            const card = link && link.closest('.card');
+            return {totals: document.querySelectorAll('.totals').length, inLatest: !!card && !!card.querySelector('h2') && !!card.querySelector('ul .row'), linkText: link ? link.textContent.trim() : ''};
+        }""")
+        check(f"{lang} Home has no Today totals card and places See the timeline inside Latest: {home_check}",
+              home_check["totals"] == 0 and home_check["inLatest"] and home_check["linkText"] == ("See the timeline" if lang == "en" else "Ver el historial"))
         page.screenshot(path=str(DAY_TOTAL_SHOTS / f"home-{lang}.png"), full_page=True)
         navigate(page, "log")
+        feed, sleep, diaper = day_total_text(page, '[data-day-totals="0"] .total.t-feed dd'), day_total_text(page, '[data-day-totals="0"] .total.t-sleep dd'), day_total_text(page, '[data-day-totals="0"] .total.t-dia dd')
+        check(f"{lang} Timeline Feed total shows feeds, nursing time and bottle volume of the calendar day: {feed}", feed == want["feed"])
+        check(f"{lang} Timeline Sleep total counts a sleep across midnight and across 7 AM by calendar day: {sleep}", sleep == want["sleep"])
+        check(f"{lang} Timeline shows the diaper counts once: {diaper}", diaper == want["diaper"] and page.get_by_text("Wet 2").count() + page.get_by_text("Pipí 2").count() == 1)
         today = timeline_total_text(page)
         check(f"{lang} Timeline today shows one totals block: {today}", today == want["today"] and page.locator('[data-day-totals="0"]').count() == 1)
         page.screenshot(path=str(DAY_TOTAL_SHOTS / f"timeline-{lang}.png"), full_page=True)
@@ -573,17 +581,19 @@ def audit_day_totals(browser, base):
         page.st["entries"] = [e for e in day_totals_entries(bottle=False) if e["id"] != "dt-feed-2"]
         page.reload()
         page.locator('.tile[data-act="open-feed"]').wait_for()
-        one = day_total_text(page, '[data-day-total="feed"]')
-        check(f"{lang} Home with one feed and no bottle shows the singular and no volume: {one}", one == want["one"])
+        navigate(page, "log")
+        one = day_total_text(page, '[data-day-totals="0"] .total.t-feed dd')
+        check(f"{lang} Timeline with one feed and no bottle shows the singular and no volume: {one}", one == want["one"])
         page.st["entries"] = day_totals_entries(bottle=False)
         page.st["sleepRun"] = {"id": "dt-run", "kind": "sleep", "t0": 600, "by": "Rowan"}  # started 10:00 AM, 2 h before now
         page.reload()
         page.locator('.tile[data-act="open-feed"]').wait_for()
-        nobottle = day_total_text(page, '[data-day-total="feed"]')
-        running = day_total_text(page, '[data-day-total="sleep"]')
-        check(f"{lang} Home with no bottle shows nursing time only: {nobottle}", nobottle == want["nobottle"] and "ml" not in nobottle)
-        check(f"{lang} Home running sleep timer counts up to now: {running}", running == want["running"])
         page.screenshot(path=str(DAY_TOTAL_SHOTS / f"home-running-{lang}.png"), full_page=True)
+        navigate(page, "log")
+        nobottle = day_total_text(page, '[data-day-totals="0"] .total.t-feed dd')
+        running = day_total_text(page, '[data-day-totals="0"] .total.t-sleep dd')
+        check(f"{lang} Timeline with no bottle shows nursing time only: {nobottle}", nobottle == want["nobottle"] and "ml" not in nobottle)
+        check(f"{lang} Timeline running sleep timer counts up to now: {running}", running == want["running"])
         check(f"{lang} day totals page has no script errors", not page.errors)
         page.context.close()
     page = open_app(browser, base, 390, 844, at, lang="en", theme="off")
@@ -591,7 +601,8 @@ def audit_day_totals(browser, base):
     page.st["preferences"]["units"] = "us"
     page.reload()
     page.locator('.tile[data-act="open-feed"]').wait_for()
-    us = day_total_text(page, '[data-day-total="feed"]')
+    navigate(page, "log")
+    us = day_total_text(page, '[data-day-totals="0"] .total.t-feed dd')
     check(f"US units show the volume in oz: {us}", us.startswith("4 feeds · 40 min · ") and us.endswith(" oz"))
     page.context.close()
 
@@ -625,51 +636,46 @@ def audit_day_totals_live(browser, base):
         page.st["sleepRun"] = {"id": "dl-run", "kind": "sleep", "t0": 600, "by": "Rowan"}  # 10:00 AM; now is 12:00 PM
         page.reload()
         page.locator('.tile[data-act="open-feed"]').wait_for()
-        before = day_total_text(page, '[data-day-total="sleep"]')
+        navigate(page, "log")
+        before = day_total_text(page, '[data-day-totals="0"] .total.t-sleep dd')
         page.clock.set_fixed_time(at + timedelta(minutes=3))
         page.wait_for_timeout(2500)
-        after = day_total_text(page, '[data-day-total="sleep"]')
-        check(f"{lang} Home sleep total advances while the timer runs: {before} -> {after}", before.startswith("2 h ·") and after.startswith("2 h 3 min"))
-        navigate(page, "log")
+        after = day_total_text(page, '[data-day-totals="0"] .total.t-sleep dd')
+        check(f"{lang} Timeline sleep total advances while the timer runs: {before} -> {after}", before.startswith("2 h ·") and after.startswith("2 h 3 min"))
         open_search(page)
         page.locator('[data-fid="search"]').click()
         page.keyboard.type("a")
         page.wait_for_timeout(300)
         page.clock.set_fixed_time(at + timedelta(minutes=6))
         page.wait_for_timeout(2500)
-        line = timeline_total_text(page)
         typing = page.evaluate("[document.activeElement?.dataset.fid, document.activeElement?.value]")
-        check(f"{lang} Timeline total advances while the timer runs and keeps the search field as typed: {line}", "2 h 6 min" in line and typing == ["search", "a"])
+        check(f"{lang} Timeline search field stays intact while the timer ticks: {typing}", typing == ["search", "a"])
         check(f"{lang} live totals page has no script errors", not page.errors)
         page.context.close()
         # An empty day: the first timer has run for no minutes, so no total exists until a minute passes.
         word = "sleep" if lang == "en" else "sueño"
-        for screen in ("home", "log"):
-            page = open_app(browser, base, 390, 844, at, lang=lang, theme="off")
-            page.set_default_timeout(5000)
-            page.st["entries"] = []
-            page.st["sleepRun"] = {"id": "dl-first", "kind": "sleep", "t0": 720, "by": "Rowan"}
-            page.reload()
-            page.locator('.tile[data-act="open-sleep"]').wait_for()
-            if screen == "log":
-                navigate(page, "log")
-            selector = '[data-day-totals="0"]' if screen == "log" else '[data-day-total="sleep"]'
-            before = page.locator(selector).count()
-            page.clock.set_fixed_time(at + timedelta(minutes=3))
-            page.wait_for_timeout(2500)
-            text = timeline_total_text(page) if screen == "log" else day_total_text(page, selector) if page.locator(selector).count() else ""
-            typing = ["search", "a"]
-            check(f"{lang} {screen} total appears on an empty day when the first timer passes a minute: {text}", before == 0 and text == f"3 min · 1 {word}" and typing == ["search", "a"])
-            if screen == "log":
-                # R5 (look match, round 3): search results show no day totals, so the typing check is its own step: a tick must not take the field away.
-                open_search(page)
-                page.locator('[data-fid="search"]').click()
-                page.keyboard.type("a")
-                page.clock.set_fixed_time(at + timedelta(minutes=5))
-                page.wait_for_timeout(2500)
-                check(f"{lang} log typing in search survives the timer tick", page.evaluate("[document.activeElement?.dataset.fid, document.activeElement?.value]") == ["search", "a"])
-            check(f"{lang} {screen} first-timer page has no script errors", not page.errors)
-            page.context.close()
+        page = open_app(browser, base, 390, 844, at, lang=lang, theme="off")
+        page.set_default_timeout(5000)
+        page.st["entries"] = []
+        page.st["sleepRun"] = {"id": "dl-first", "kind": "sleep", "t0": 720, "by": "Rowan"}
+        page.reload()
+        page.locator('.tile[data-act="open-sleep"]').wait_for()
+        check(f"{lang} Home with only a running timer keeps the See the timeline link in Latest", page.locator('.wrap [data-act="tab"][data-arg="log"]').count() == 1)
+        navigate(page, "log")
+        before = page.locator('[data-day-totals="0"]').count()
+        page.clock.set_fixed_time(at + timedelta(minutes=3))
+        page.wait_for_timeout(2500)
+        text = timeline_total_text(page)
+        check(f"{lang} log total appears on an empty day when the first timer passes a minute: {text}", before == 0 and text == f"3 min · 1 {word}")
+        # R5 (look match, round 3): search results show no day totals, so the typing check is its own step: a tick must not take the field away.
+        open_search(page)
+        page.locator('[data-fid="search"]').click()
+        page.keyboard.type("a")
+        page.clock.set_fixed_time(at + timedelta(minutes=5))
+        page.wait_for_timeout(2500)
+        check(f"{lang} log typing in search survives the timer tick", page.evaluate("[document.activeElement?.dataset.fid, document.activeElement?.value]") == ["search", "a"])
+        check(f"{lang} log first-timer page has no script errors", not page.errors)
+        page.context.close()
 
 
 def audit_known_gaps(browser, base):
@@ -762,10 +768,13 @@ def audit_look_spacing(browser, base):
                 {"id": "sp-feed-1", "type": "feed", "side": "L", "dur": 10, "t": 60, "by": "Rowan"}, {"id": "sp-feed-2", "type": "feed", "side": "R", "dur": 10, "t": 370, "by": "Rowan"}]
             page.reload()
             page.locator('.tile[data-act="open-feed"]').wait_for()
-            gaps = page.evaluate("""() => { const kids = [...document.querySelector('.wrap').children].map(e => e.getBoundingClientRect());
-                const tiles = [...document.querySelectorAll('.tiles .tile')].map(e => e.getBoundingClientRect());
-                return {between: kids.slice(1).map((b, i) => Math.round(b.top - kids[i].bottom)), inside: tiles.slice(1).map((b, i) => Math.round(b.left - tiles[i].right))}; }""")
-            check(f"{lang} {width}x{height} Home keeps 24 px between groups and 8 px between the tiles: {gaps}", set(gaps["between"]) == {24} and set(gaps["inside"]) == {8})
+            # The Crying card (DESIGN.md, 2026-11-20) is the one exception: 16 px above it and 16 px below it. It must be there (cryGap is null without it).
+            gaps = page.evaluate("""() => { const els = [...document.querySelector('.wrap').children], kids = els.map(e => e.getBoundingClientRect());
+                const tiles = [...document.querySelectorAll('.tiles .tile')].map(e => e.getBoundingClientRect()), cry = document.querySelector('.cry-home');
+                const cryGap = cry ? Math.round(cry.lastElementChild.getBoundingClientRect().top - cry.firstElementChild.getBoundingClientRect().bottom) : null;
+                return {between: kids.slice(1).map((b, i) => Math.round(b.top - kids[i].bottom)), want: kids.slice(1).map((b, i) => els[i].classList.contains('cry-home') ? 16 : 24),
+                        cryGap, inside: tiles.slice(1).map((b, i) => Math.round(b.left - tiles[i].right))}; }""")
+            check(f"{lang} {width}x{height} Home keeps 24 px between groups (16 px above and below the Crying card) and 8 px between the tiles: {gaps}", gaps["between"] == gaps["want"] and gaps["cryGap"] == 16 and set(gaps["inside"]) == {8})
             broken = page.evaluate("""() => { const out = [];
                 for (const el of document.querySelectorAll('.row strong, .row .sub, .total dd, .run-card .clock, .run-card .sub')) for (const node of [el, ...el.querySelectorAll('*')]) for (const t of [...node.childNodes].filter(n => n.nodeType === 3)) {
                     for (const m of t.data.matchAll(/\\d+[ \\u00a0][a-z]+/g)) { const r = document.createRange(); r.setStart(t, m.index); r.setEnd(t, m.index + m[0].length);
@@ -1041,13 +1050,13 @@ NIGHT_HOME = [
     ("running card title", ".run-card h2", "text"), ("running card timer", ".run-card .clock", "text"), ("running card line", ".run-card .sub", "text"),
     ("running card glyph", ".run-card .ico", "glyph"), ("running card button text", ".run-card .back", "text"), ("running card button border", ".run-card .back", "border"),
     ("Latest title", ".card > h2", "text"), ("Latest row title", ".row strong", "text"), ("Latest row line", ".row .sub", "text"), ("Latest row glyph", ".row .ico", "glyph"),
-    ("Today row label", ".total dt", "text"), ("Today row value", ".total dd", "text"), ("Timeline link", ".textlink", "text"),
+    ("Timeline link", ".textlink", "text"),
     ("nav row text", ".nav-row", "text"), ("nav row chevron", ".nav-row .chev svg", "glyph"), ("nav row glyph", ".nav-row > svg", "glyph"),
 ]
 NIGHT_TIMELINE = [
     ("chip on", '.chip[aria-pressed="true"]', "text"), ("chip on border", '.chip[aria-pressed="true"]', "border"),
     ("chip off", '.chip[aria-pressed="false"]', "text"), ("chip off border", '.chip[aria-pressed="false"]', "border"),
-    ("chip check", ".chip svg", "glyph"), ("chip dot", ".chip .dot", "fill"), ("day heading", ".day > h2", "text"), ("Today row label", ".total dt", "text"), ("Today row value", ".total dd", "text"),
+    ("chip dot", ".chip .dot", "fill"), ("day heading", ".day > h2", "text"), ("Today row label", ".total dt", "text"), ("Today row value", ".total dd", "text"),
     ("row title", ".list .row strong", "text"), ("row line", ".list .row .sub", "text"), ("row time", ".list .row time", "text"), ("row glyph", ".list .row .ico", "glyph"), ("row icon block", ".list .row:not(.t-plain) .ico .plate", "block"),  # care blocks only: the neutral block is 1.37:1 by design (DESIGN.md Color rule 5); its line is measured as a glyph
     ("empty day line", ".day .card > p.sub", "text"), ("earlier-day link", ".textlink", "text"), ("title bar button", ".bar .back", "text"), ("title bar button border", ".bar .back", "border"),
 ]

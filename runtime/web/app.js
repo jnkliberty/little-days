@@ -1,6 +1,6 @@
 /* ---------- words: [English, Spanish (Mexico, usted)] ---------- */
 const W = {
-  factPrevious:['Previous fact','Dato anterior'], factNext:['Next fact','Dato siguiente'], factPause:['Pause','Pausar'], factPlay:['Play','Reproducir'], factPosition:[(n,total)=>`Fact ${n} of ${total}`,(n,total)=>`Dato ${n} de ${total}`],
+  factPrevious:['Previous fact','Dato anterior'], factNext:['Next fact','Dato siguiente'], factPosition:[(n,total)=>`Fact ${n} of ${total}`,(n,total)=>`Dato ${n} de ${total}`],
   askAI:['Ask AI','Preguntar a IA'], factSource:['Source','Fuente'], bunnyTap:['Make the bunny hop','Hacer saltar al conejito'], factLog:['View log','Ver historial'], askShort:['Ask','Preguntar'],
   factEmpty:['A little more to discover','Hay más por descubrir'], factEmptyBody:['Facts will appear as her age and care records become available.','Los datos aparecerán cuando estén disponibles su edad y sus registros de cuidado.'],
   askAbout:[name=>`Ask AI about ${name}`,name=>`Preguntar a IA sobre ${name}`], aiNotice:['Not medical advice. For urgent symptoms, call your doctor or your local emergency number.','No es consejo médico. Con síntomas urgentes, llame a su médico o al número de emergencias.'],aiBlank:[name=>`What would you like to know about ${name}?`,name=>`¿Qué le gustaría saber sobre ${name}?`],
@@ -88,6 +88,9 @@ const W = {
   savedBottle: [v => `Bottle ${v} saved`, v => `Biberón de ${v} guardado`],
   savedPump: [v => `Pump ${v} saved`, v => `Extracción de ${v} guardada`],
   savedFeed: ['Feed saved', 'Toma guardada'], savedSleep: ['Sleep saved', 'Sueño guardado'], savedItem: [n => `${n} saved`, n => `${n} guardado`],
+  // A sleep save that crosses saved sleeps names them; spans come from sleepSpanText. A Spanish span ends with "a. m." or "p. m.", whose period also ends the sentence.
+  sleepOverlapOne: [s => `This overlaps the sleep from ${s}. Change the start or end, or delete that sleep in the timeline.`, s => `Se cruza con el sueño de ${s} Cambie el inicio o el final, o borre ese sueño en el Historial.`],
+  sleepOverlapMany: [(n, s) => `This overlaps ${n} saved sleeps: ${s}. Change the start or end, or delete those sleeps in the timeline.`, (n, s) => `Se cruza con ${n} sueños guardados: ${s} Cambie el inicio o el final, o borre esos sueños en el Historial.`],
   careTitle:['Care hours','Horas de cuidado'],careShare:['Share my confirmations with Health','Compartir mis confirmaciones con Salud'],careStart:['Care start','Inicio del cuidado'],careEnd:['Care end','Fin del cuidado'],careConfirm:['Confirm this care period','Confirmar este periodo'],careInvalid:['Choose a valid period of 24 hours or less.','Elija un periodo válido de 24 horas o menos.'],careEmpty:['No care periods confirmed.','No hay periodos de cuidado confirmados.'],careUnavailable:['Care data could not be loaded. Check the connection and try again.','No se pudieron cargar los datos de cuidado. Revise la conexión e inténtelo de nuevo.'],careSaved:['Care setting saved.','Se guardó la opción de cuidado.'],careConfirmed:['Care period saved.','Se guardó el periodo de cuidado.'],careRevoked:['Care period revoked.','Se revocó el periodo de cuidado.'],careHistory:['Duty history','Historial de turnos'],currentDuty:['Current assignment','Turno actual'],revoke:['Revoke','Revocar'],shareOn:['Sharing is on','El uso compartido está activado'],shareOff:['Sharing is off','El uso compartido está desactivado'],medicine: ['Medicine', 'Medicina'], temp: ['Temperature', 'Temperatura'], note: ['Note', 'Nota'],
   solids: ['Solids', 'Sólidos'], tummy: ['Tummy time', 'Tiempo boca abajo'], bath: ['Bath', 'Baño'], mile: ['Milestone', 'Logro'],
   nap: ['Nap', 'Siesta'], night: ['Night sleep', 'Sueño nocturno'], sleepKind: ['Kind of sleep', 'Tipo de sueño'],
@@ -268,7 +271,6 @@ function applySharedFields(state,today,offset) {
   S.run=state.run===undefined?S.run:timerAt(state.run);S.sleepRun=state.sleepRun===undefined?S.sleepRun:timerAt(state.sleepRun);S.pumpRun=state.pumpRun===undefined?S.pumpRun:timerAt(state.pumpRun);S.timers=Array.isArray(state.timers)?state.timers.map(timerAt):[];S.preferences=state.preferences||{};S.permissions=state.permissions||{};S.dutyNote=state.dutyNote||'';S.dutyNoteBy=state.dutyNoteBy||state.dutyNoteAuthor||'';
   const id=String(typeof S.me==='object'?(S.me.id||personName(S.me)):personName(S.me));
   S.units[id]=S.preferences.units==='us'?'us':'metric';{const saved=S.preferences.lang||S.preferences.language;S.lang=saved==='es'||saved==='en'?saved:DEFAULT_LANG;}S.pal=S.preferences.palette||'Sorbet';S.night=!!S.preferences.night;
-  S.handoffAt=Date.parse(state.dutyNoteAt||'');
   S.duty=personName(S.people.find(p=>p.onDuty||p.on_duty)||S.me)||'';
   S.loadedDay=todayISO();
   queueMicrotask(()=>void loadDailyDevelopment());
@@ -286,8 +288,16 @@ async function loadDailyDevelopment(){
   if(S.developmentAttempt?.key===key&&Date.now()<S.developmentAttempt.until)return;
   const attempt={key,until:Infinity};S.developmentAttempt=attempt;
   const current=()=>S.developmentAttempt===attempt&&S.auth==='ready'&&resourceAllowed('children')&&key===`${meKey()}:${S.child?.id}:${S.child?.birthDate}:${todayISO()}`;
-  try{const batch=await LittleDaysAPI.development();if(!current())return;S.developmentBatch=batch;attempt.until=batch.status==='ready'?Infinity:Date.now()+15*60000;renderHomeCard();}
-  catch{if(current()){S.developmentBatch=null;attempt.until=Date.now()+15*60000;renderHomeCard();}}
+  // The daily facts arrive after the first Home render. Until someone moves the card, Home opens on the first card of the new mix (a fun card).
+  // A reply with the same cards as the loaded batch leaves the shown card in place (the 1-minute retry of a pending reply, review r1 2026-11-20).
+  const owner=`${meKey()}:${S.child.id}`,ids=b=>(b?.cards||[]).map(c=>c?.id).join('\n');
+  try{const batch=await LittleDaysAPI.development();if(!current())return;
+    const changed=S.developmentOwner!==owner||ids(S.developmentBatch)!==ids(batch);
+    S.developmentBatch=batch;S.developmentOwner=owner;if(changed&&!factMoved&&!factPaused)S.factId='';
+    attempt.until=batch.status==='ready'?Infinity:Date.now()+(batch.status==='pending'?60000:15*60000);renderHomeCard();}
+  // A failed request keeps the loaded facts of the same adult and child (a brief network drop must not empty Home for 15 minutes).
+  // They go only when the adult or the child changed, or the server refuses access.
+  catch(error){if(current()){if(error?.status===403||S.developmentOwner!==owner)S.developmentBatch=null;attempt.until=Date.now()+15*60000;renderHomeCard();}}
 }
 function loadServerState(state) {
   S.foodRequest=(S.foodRequest||0)+1;S.foodEntries=[];S.foodLoading=false;S.foodError=false;
@@ -651,8 +661,9 @@ const clockAt=(h,m,p)=>`${+h||12}:${pad(m)} ${S.lang==='es'?(p==='PM'?'p. m.':'a
 const dateLabel = d => { const x = new Date(`${dayISO(d)}T12:00:00Z`); const mo = S.lang === 'es' ? ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return S.lang === 'es' ? `${x.getUTCDate()} ${mo[x.getUTCMonth()]}` : `${mo[x.getUTCMonth()]} ${x.getUTCDate()}`; };
 const kindWord = k => k === 'W' ? t('wet') : k === 'D' ? t('dirty') : t('both');
 
-const factMotion=matchMedia('(prefers-reduced-motion: reduce)');
-let factPaused=false,factTimer=null,factTimerId='',factRedraw=false,factSwipeFacts=null;
+const factMotion=matchMedia('(prefers-reduced-motion: reduce)'),factHover=matchMedia('(hover: hover)');
+const FACT_TEXT_MS=7000,FACT_GRAPH_MS=12000;
+let factMoved=false,factPaused=false,factTimer=null,factTimerId='',factTimerGraph=false,factTimerTotal=FACT_TEXT_MS,factTimerElapsed=0,factTimerStarted=0,factRedraw=false,factSwipeFacts=null;
 
 /* ---------- home ---------- */
 // Day totals, midnight to midnight. A part that is zero is left out, and an empty day shows no line.
@@ -665,19 +676,58 @@ const sleepTotalsText=o=>o.sleeps?`${durText(o.sleepMin)} · ${t('sleepCount',o.
 // A number stays with its unit on a tile line, so a line breaks only between units (as the timer does).
 const joinUnits=text=>text.replace(/(\d) (?=[a-zñ])/gi,'$1\u00a0');
 // The fact's care type picks the icon block. A fact about no care type (an age tip, tummy time, a milestone) gets the neutral block.
-const FACT_LOOK={feeds:['c-feed','bottle'],diapers:['c-dia','diaper'],sleep:['c-sleep','moon']};
+const FACT_LOOK={feeds:['c-feed','bottle'],bottles:['c-feed','bottle'],diapers:['c-dia','diaper'],sleep:['c-sleep','moon']};
+// A fact with a graph shows its number, the graph and a short note. The full sentence stays in fact.body for Ask.
+
+// Every drawing's screen-reader label is the full fact sentence. Labels are page text (14 px), never text inside the drawing.
+function factViz(f){
+  const v=f.viz,label=esc(f.body),pct=n=>`${(100*n).toFixed(2)}%`;
+  // By this time: a "usual" label left of the dashed line, then "Last N days" and a bold "Today" under the drawing.
+  // Night sleep uses the same drawing around the average, with a weekday letter under each night (the latest one bold).
+  if(v.kind==='columns'&&v.usual!=null)return `<div class="viz-diff" style="--n:${v.bars.length}"><span class="viz-usual" aria-hidden="true">${esc(v.usualLabel)}</span>${LittleDaysCharts.mini(v.bars,v.usual,label,v.floor)}`
+    +(v.letters?`<div class="viz-days viz-diff-days" style="--n:${v.bars.length}" aria-hidden="true">${v.letters.map((l,i)=>`<span${i===v.letters.length-1?' class="val"':''}>${esc(l)}</span>`).join('')}</div>`
+      :`<div class="viz-foot" aria-hidden="true"><span>${esc(v.span)}</span><span class="val">${esc(v.todayLabel)}</span></div>`)+'</div>';
+  if(v.kind==='week')return weekViz(v);
+  if(v.kind==='growth')return LittleDaysCharts.growthLine(v.points,esc(v.label||f.body))+`<div class="viz-ends" aria-hidden="true"><span>${esc(v.first)}</span><span class="val">${esc(v.last)}</span></div>`;
+  if(v.kind==='columns')return LittleDaysCharts.mini(v.bars,null,label)
+    +`<div class="viz-days" style="--n:${v.bars.length}" aria-hidden="true">${v.bars.map(b=>`<span${b.today?' class="val"':''}>${esc(b.label)}</span>`).join('')}</div>`;
+  // Bottles: each number sits above its bar, and the hour labels sit under the line, at the drawing's own positions.
+  const pad=LittleDaysCharts.DAYLINE_PAD*100,at=m=>`left:${(pad+(100-2*pad)*m/1440).toFixed(2)}%`;
+  const nums=LittleDaysCharts.daylineLabels(v.marks,v.now).map(n=>`<span class="viz-num${n.hollow?' hollow':''}" style="left:${pct(n.x)};top:${pct(n.y)}">${esc(n.text)}</span>`).join('');
+  return `<div class="viz-line">${LittleDaysCharts.dayline(v.marks,v.now,label)}<div class="viz-nums" aria-hidden="true">${nums}</div></div>`
+    +`<div class="viz-hours" aria-hidden="true">${[6,12,18].map(h=>`<span style="${at(h*60)}">${axisH(h)}</span>`).join('')}</div>`;
+}
+// Last 7 days: one grid, each care row a subgrid, so the bar groups share both edges. With 14 finished days a heading names
+// what the change column compares; it sits on the first row's label line. Each row reads as one sentence to a screen reader.
+function weekViz(v){
+  const head=v.change?`<span class="wk-head" aria-hidden="true">${esc(v.head)}</span>`:'';
+  return `<div class="viz-week${v.change?' with-change':''}">${v.rows.map((r,i)=>`<div class="wk-row ${r.tone}" role="img" aria-label="${esc(r.label)}"><b class="wk-name" aria-hidden="true">${esc(r.name)}</b>${i?'':head}`
+    +`<span class="wk-avg" aria-hidden="true">${esc(keepUnits(r.avg))}</span><span class="wk-bars" aria-hidden="true">${LittleDaysCharts.week(r.days)}</span>${v.change?`<span class="wk-change" aria-hidden="true">${esc(keepUnits(r.change||''))}</span>`:''}</div>`).join('')}</div>`;
+}
+// A duration ("14 h 51 min") stays on one line, as a number stays with its unit.
+const keepUnits=text=>joinUnits(text).replace(/(\d\u00a0h) (?=\d)/g,'$1\u00a0');
+// Order: headline, note, drawing (with its labels). A nursing note starts with the same dot the drawing uses.
+const noteMark=f=>f.noteMark==='nurse'?'<svg class="note-mark" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4"/></svg>':'';
+// A card that is only a number (big) shows it at 30 px. A wrapping headline keeps "·" at the end of its line.
+const factFigure=f=>f.headline?`<p class="fact-figure${f.big?' big':''}">${esc(keepUnits(f.headline).replace(/ · /g,' · '))}</p>`:'';
+const factNote=f=>f.note?`<p class="fact-note">${noteMark(f)}${esc(keepUnits(f.note))}</p>`:'';
+const factLook=f=>factFigure(f)+factNote(f)+(f.viz?`<div class="fact-viz">${factViz(f)}</div>`:'');
 function statusCard() {
   const facts=S.renderedFacts=factSwipeFacts||factPool(),fact=currentFact(facts),index=facts.findIndex(f=>f.id===fact?.id),several=facts.length>1,askOn=!!LittleDaysAPI.ai;
-  const record=fact?.evidence.find(ref=>ref.kind==='record'),source=fact?.evidence.find(ref=>ref.kind==='source');
-  const refs=[record,source].filter(Boolean).map(ref=>referenceHTML(ref,true)).join('');
+  const refs=factRefs(fact);
   const [tone,art]=FACT_LOOK[fact?.topic]||['c-plain','sprout'];
   const title=fact?.title||t('factEmpty'),body=fact?.body||t('factEmptyBody');
-  const dots=facts.map((f,i)=>`<span class="fact-dot${i===index?' current':''}"></span>`).join('');
+  const graph=Boolean(fact?.viz),total=graph?FACT_GRAPH_MS:FACT_TEXT_MS,same=factTimerId===(fact?.id||'')&&factTimerGraph===graph;
+  const elapsed=same?Math.min(total,factTimerElapsed+(factTimer&&factTimerStarted?performance.now()-factTimerStarted:0)):0;
+  const fillStyle=factMotion.matches?'':` style="animation-duration:${total}ms;animation-delay:-${Math.round(elapsed)}ms;animation-play-state:${factTimer&&same?'running':'paused'}"`;
+  // At most 3 dots: a window that slides with the current fact. The current pill fills across the timer duration.
+  const first=Math.max(0,Math.min(index-1,facts.length-3)),shown=facts.slice(first,first+3);
+  const dots=shown.map((f,i)=>{const at=first+i,cur=at===index,more=(i===0&&at>0)||(i===shown.length-1&&at<facts.length-1);return `<span class="fact-dot${cur?' current':''}${more&&!cur?' more':''}">${cur?`<i class="fact-fill"${fillStyle}></i>`:''}</span>`}).join('');
   // Every fact shares one grid cell with the card, so the card keeps the height of the tallest fact and nothing below it moves.
-  const sizers=(facts.length?facts:[{title,body}]).map(f=>`<span class="fact-size" aria-hidden="true"><i class="fs-icon"></i><b class="fs-title" data-text="${esc(f.title)}"></b>${askOn?`<i class="ask-space" data-text="${esc(t('askShort'))}"></i>`:''}<span class="fs-body" data-text="${esc(f.body)}"></span><i class="fs-link"></i></span>`).join('');
-  const pause=several&&!factMotion.matches?`<button type="button" class="text-link fact-pause" data-act="fact-pause">${glyph(factPaused?'play':'pause')}${t(factPaused?'factPlay':'factPause')}</button>`:'';
-  const nav=several?`<div class="fact-navigation"><button type="button" class="fact-arrow" data-act="fact-previous" aria-label="${t('factPrevious')}">${glyph('back')}</button><div class="fact-dots" role="img" aria-label="${esc(t('factPosition',Math.max(0,index+1),facts.length))}"><span aria-hidden="true">${dots}</span></div><button type="button" class="fact-arrow" data-act="fact-next" aria-label="${t('factNext')}">${glyph('chev')}</button>${pause}</div>`:'';
-  return S.homeCardHTML=`<section class="card status insight ${tone}" aria-labelledby="fact-title" aria-roledescription="carousel" data-fact="${esc(fact?.id||'')}"><div class="fact-stack"><div class="fact-content">${iconBlock(art)}<h2 id="fact-title">${esc(title)}</h2>${askOn?`<button type="button" class="ask-pill" data-act="ask-ai" aria-label="${t('askAbout',esc(babyName()))}">${glyph('spark')}${t('askShort')}</button>`:''}<p class="fact-body">${esc(body)}</p><div class="fact-actions">${refs}</div></div>${sizers}</div>${nav}</section>`;
+  // A sizer carries its fact's own links, because the links share their row with the arrows and can wrap.
+  const sizers=(facts.length?facts:[{title,body}]).map(f=>`<span class="fact-size" aria-hidden="true"><i class="fs-icon"></i><b class="fs-title" data-text="${esc(f.title)}"></b>${askOn?`<i class="ask-space" data-text="${esc(t('askShort'))}"></i>`:''}${f.headline||f.viz?`<span class="fs-body fact-look">${factLook(f)}</span>`:`<span class="fs-body" data-text="${esc(f.body)}"></span>`}<span class="fs-link">${factRefs(f,true)}</span></span>`).join('');
+  const nav=several?`<div class="fact-navigation"><button type="button" class="fact-arrow" data-act="fact-previous" aria-label="${t('factPrevious')}">${glyph('back')}</button><div class="fact-dots" role="img" aria-label="${esc(t('factPosition',Math.max(0,index+1),facts.length))}"><span aria-hidden="true">${dots}</span></div><button type="button" class="fact-arrow" data-act="fact-next" aria-label="${t('factNext')}">${glyph('chev')}</button></div>`:'';
+  return S.homeCardHTML=`<section class="card status insight ${tone}" aria-labelledby="fact-title" aria-roledescription="carousel" data-fact="${esc(fact?.id||'')}"><div class="fact-stack"><div class="fact-content">${iconBlock(art)}<h2 id="fact-title">${esc(title)}</h2>${askOn?`<button type="button" class="ask-pill" data-act="ask-ai" aria-label="${t('askAbout',esc(babyName()))}">${glyph('spark')}${t('askShort')}</button>`:''}${fact?.headline||fact?.viz?`<div class="fact-body fact-look">${factLook(fact)}</div>`:`<p class="fact-body">${esc(body)}</p>`}<div class="fact-actions">${refs}</div></div>${sizers}</div>${nav}</section>`;
 }
 function renderHomeCard(){
   if(!homeVisible()||S.sheet||S.confirmStop)return;
@@ -691,10 +741,13 @@ function renderHomeCard(){
   const key=keyOf(document.activeElement);
   card.outerHTML=html;refocus(key);syncFactCarousel();
 }
-function moveFact(direction,swipe=null){
+// auto: the timer turned the card. Only a person moving the card (swipe, arrows) keeps late daily facts from reopening Home on a fun card.
+function moveFact(direction,swipe=null,auto=false){
   const latest=factPool(),facts=(S.renderedFacts||latest).filter(f=>latest.some(item=>item.id===f.id));
   const index=facts.findIndex(f=>f.id===S.factId);
   if(facts.length<2){redrawAfterFactPress();return;}
+  if(!auto)factMoved=true;
+  factTimerElapsed=0;factTimerStarted=0;
   const outgoing=swipe&&!factMotion.matches?swipe.content.cloneNode(true):null;
   S.factId=facts[(index+direction+facts.length)%facts.length].id;
   if(outgoing)factSwipeFacts=S.renderedFacts;
@@ -732,7 +785,7 @@ function endFactSwipe(ev){
   if(!direction){resetFactDrag(start);redrawAfterFactPress();syncFactCarousel();return;}
   factSwiped=true;
   if(!start.several){resetFactDrag(start);redrawAfterFactPress();return;}
-  factPaused=true;moveFact(direction,start);
+  moveFact(direction,start);
 }
 document.addEventListener('pointerdown',ev=>{
   factSwiped=false;
@@ -764,24 +817,42 @@ document.addEventListener('pointerup',endFactSwipe);
 document.addEventListener('pointercancel',ev=>{if(factSwipe?.id===ev.pointerId){const start=factSwipe;factSwipe=null;resetFactDrag(start);redrawAfterFactPress();syncFactCarousel();}});
 document.addEventListener('keydown',()=>{factSwiped=false;},true);
 document.addEventListener('click',ev=>{if(factSwiped){factSwiped=false;ev.stopImmediatePropagation();ev.preventDefault();}},true);
+function syncFactFill(card,total,elapsed,running,restart=false){
+  const fill=card?.querySelector('.fact-dot.current .fact-fill');
+  if(!fill||factMotion.matches)return;
+  if(restart){fill.style.animation='none';void fill.offsetWidth;fill.style.animation='';}
+  fill.style.animationDuration=`${total}ms`;
+  fill.style.animationDelay=`-${Math.round(elapsed)}ms`;
+  fill.style.animationPlayState=running?'running':'paused';
+}
 function syncFactCarousel(){
   const card=$('.insight');
-  const blocked=S.auth!=='ready'||S.tab!=='home'||S.sheet||document.hidden||factPaused||factMotion.matches||factSwipe||!card?.querySelector('.fact-navigation')||card.matches(':hover')||card.contains(document.activeElement);
-  if(blocked||factTimerId!==S.factId){clearTimeout(factTimer);factTimer=null;}
-  if(blocked)return;
-  if(!factTimer){factTimerId=S.factId;factTimer=setTimeout(()=>{factTimer=null;moveFact(1);},7000);}
+  const blocked=S.auth!=='ready'||S.tab!=='home'||S.sheet||document.hidden||factPaused||factMotion.matches||factSwipe||!card?.querySelector('.fact-navigation')||(factHover.matches&&card.matches(':hover'))||card.contains(document.activeElement);
+  // A card that changes kind under the same id (text to graph) restarts its timer with the new time (review r1, 2026-11-19).
+  const graph=Boolean(card?.querySelector('.fact-content .fact-viz'));
+  const total=graph?FACT_GRAPH_MS:FACT_TEXT_MS;
+  const changed=factTimerId!==S.factId||factTimerGraph!==graph;
+  if(changed){clearTimeout(factTimer);factTimer=null;factTimerId=S.factId;factTimerGraph=graph;factTimerTotal=total;factTimerElapsed=0;factTimerStarted=0;}
+  if(blocked){
+    if(factTimer){factTimerElapsed=Math.min(factTimerTotal,factTimerElapsed+(factTimerStarted?performance.now()-factTimerStarted:0));clearTimeout(factTimer);factTimer=null;factTimerStarted=0;}
+    syncFactFill(card,factTimerTotal,factTimerElapsed,false,changed);
+    return;
+  }
+  // A graph card turns after 12 s, a text card after 7 s (owner, 2026-11-19; was: a graph card did not turn).
+  if(!factTimer){
+    const remaining=Math.max(1,factTimerTotal-factTimerElapsed);
+    factTimerStarted=performance.now();
+    factTimer=setTimeout(()=>{factTimer=null;factTimerElapsed=0;factTimerStarted=0;moveFact(1,null,true);},remaining);
+    syncFactFill(card,factTimerTotal,factTimerElapsed,true,changed);
+  }
 }
 for(const event of ['pointerover','pointerout','focusin','focusout','visibilitychange'])document.addEventListener(event,()=>queueMicrotask(syncFactCarousel));
 factMotion.addEventListener('change',()=>{document.getAnimations().filter(a=>a.id==='ui-enter').forEach(a=>a.cancel());if(S.auth==='ready'&&S.tab==='home')render();syncFactCarousel();});
 function factPool(){
   if(S.homeAccessBlocked)return [];
-  const today=todayISO(),nowMinutes=nowExactM(),lang=S.lang,units=unitsOf(),nowEpoch=Date.now();
+  const today=todayISO(),nowMinutes=nowExactM(),lang=S.lang,units=unitsOf();
   const entries=homeEntries(today);
-  const handoff=Number.isFinite(S.handoffAt)&&S.handoffAt<=nowEpoch?localClock(new Date(S.handoffAt).toISOString()):null;
-  const dutyAt=handoff?isoDay(handoff.date,today)*1440+handoff.hour24*60 + +handoff.minute + (S.handoffAt%60000)/60000:-Infinity;
-  const handoffNote=resourceAllowed('notes')?entries.findLast(e=>e.type==='note'&&e.title==='handoff'&&e.t<=nowMinutes&&homeReads.has(shiftISO(today,dayOf(e.t)))):null;
-  const handoffAt=Math.max(dutyAt,handoffNote?.t??-Infinity);
-  const input={entries,child:S.child,permissions:S.permissions,today,nowMinutes,lang,units,handoffAt,
+  const input={entries,child:S.child,permissions:S.permissions,today,nowMinutes,lang,units,
     readDates:homeReads,developmentCards:LittleDaysAPI.ai?S.developmentBatch?.cards||[]:[]};
   const base=LittleDaysInsights.pool({...input,entries:entries.filter(e=>homeReads.has(shiftISO(today,dayOf(e.t))))});
   const trends=globalThis.LittleDaysPersonalTrends?.pool(input)||[];
@@ -789,19 +860,17 @@ function factPool(){
   const growth=S.growthEntries.length&&!S.growthError&&globalThis.LittleDaysGrowthInsights?LittleDaysGrowthInsights.cards({
     ...input,entries:S.growthEntries,unavailable:S.growthUnavailable,chartSex:LittleDaysGrowthInsights.chartSex(S.preferences,S.child?.id)
   }):[];
-  const guidance=other.filter(f=>f.kind==='source'),personal=[...trends,...growth,...other.filter(f=>f.kind!=='source')];
-  const ordered=[];
-  for(let i=0;i<Math.max(personal.length,guidance.length);i++){
-    if(personal[i])ordered.push(personal[i]);
-    if(guidance[i])ordered.push(guidance[i]);
-  }
-  return ordered;
+  // Fun (daily facts, today's first, then milestone and about-her facts), then stat, alternating; Home opens on a fun card (owner, 2026-11-19).
+  return LittleDaysInsights.mix([...other.filter(f=>f.kind==='source'),...other.filter(f=>f.fun),...trends.filter(f=>f.fun),...trends.filter(f=>!f.fun),...growth,...other.filter(f=>f.kind!=='source'&&!f.fun)]);
 }
 function currentFact(facts){
   const fact=facts.find(f=>f.id===S.factId)||facts[0];
   S.factId=fact?.id||'';
   return fact;
 }
+// A sizer copy (size=true) holds the same words and icons with nothing to press.
+// A fact with sourceOnly (weight for length) shows only Source, so its link row keeps one line beside the controls (card mix, 2026-11-19).
+const factRefs=(f,size=false)=>(f?.sourceOnly?['source']:['record','source']).map(kind=>f?.evidence?.find(ref=>ref.kind===kind)).filter(Boolean).map(ref=>size?`<i class="text-link">${ref.kind==='record'?t('factLog')+glyph('chev'):t('factSource')+glyph('ext')}</i>`:referenceHTML(ref,true)).join('');
 function referenceHTML(ref,compact=false){
   if(ref.kind==='record'&&validDate(ref.date))return `<button type="button" class="text-link" data-act="fact-log" data-arg="${esc(ref.date)}">${esc(compact?t('factLog'):ref.label)}${compact?glyph('chev'):''}</button>`;
   if(ref.kind==='source'&&/^https:\/\//.test(ref.url||''))return `<a class="text-link" href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer"${compact?' draggable="false"':''}${compact&&ref.label?` aria-label="${esc(`${t('factSource')}: ${ref.label}`)}"`:''}>${esc(compact?t('factSource'):ref.label||t('factSource'))}${compact?glyph('ext'):''}</a>`;
@@ -884,7 +953,7 @@ function ageText() {
 }
 function homeHeader() {
   const date=new Intl.DateTimeFormat(S.lang==='es'?'es-MX':'en-US',{timeZone:LittleDaysZone.get(),weekday:'short',month:'short',day:'numeric'}).format(new Date()),age=ageText();
-  return `<header class="top"><button type="button" class="bunny-btn" aria-label="${t('bunnyTap')}">${LittleDaysBunny.svg('home-bunny')}</button><div><h1>${esc(babyName())}</h1>${age?`<p class="sub">${age}</p>`:''}</div><p class="sub when">${date}</p></header>`;
+  return `<header class="top">${S.child?.portrait?`<img class="home-portrait" src="${esc(S.child.portrait)}" alt="">`:`<button type="button" class="bunny-btn" aria-label="${t('bunnyTap')}">${LittleDaysBunny.svg('home-bunny')}</button>`}<div><h1>${esc(babyName())}</h1>${age?`<p class="sub">${age}</p>`:''}</div><p class="sub when">${date}</p></header>`;
 }
 // R1: a card in the care color while a timer runs. It opens the same form as the tile, and the live time counts up in place.
 function runCardHTML(kind) {
@@ -905,8 +974,8 @@ const tileHTML=()=>[['t-feed','open-feed','bottle','feed'],['t-sleep','open-slee
 // A quiet bunny for rows: no idle motion, so the header bunny stays the one that moves.
 const staticBunny=()=>LittleDaysBunny.svg('').replace(' data-idle','');
 // Latest (round 2): one row for each care type that has a record. While a type's timer runs, its row is left out (R1).
-// withLink: Today is hidden, so the Timeline link moves here (R3). Without it a day with no record yet has no way to the Timeline.
-function latestCard(withLink=false) {
+// The Today card left Home on 2026-11-21, so the Timeline link lives here whenever any record or running timer exists.
+function latestCard() {
   const now=nowM(),feedRunning=!!shownRun(),sleepActive=!!shownRun(S.sleepRun)||!!S.sleepPaused,rows=[];
   const row=(cls,art,title,sub)=>`<li class="row ${cls}">${iconBlock(art)}<div><strong>${joinUnits(title)}</strong><span class="sub">${joinUnits(sub)}</span></div></li>`;
   const feed=feedRunning?null:[...S.entries].filter(e=>(e.type==='feed'||e.type==='bottle')&&e.t<=nowExactM()).sort((a,b)=>b.t-a.t)[0];
@@ -919,21 +988,15 @@ function latestCard(withLink=false) {
   const dia=lastOf('diaper');
   if(dia)rows.push(row('t-dia',dia.kind==='W'?'wet':dia.kind==='D'?'dirty':'diaper',t('changedAgo',durText(now-dia.t)),dia.kind==='W'?t('wet'):dia.kind==='D'?t('dirty'):t('wetDirty')));
   const none=`<div class="latest-empty" data-r="R3">${staticBunny()}<div><strong>${t('homeEmpty')}</strong><span class="sub">${t('homeEmptyHint')}</span></div></div>`;
-  return `<section class="card"><h2>${t('latest')}</h2>${rows.length?`<ul>${rows.join('')}</ul>`:none}${withLink&&rows.length?`<button type="button" class="textlink" data-r="R3" data-act="tab" data-arg="log">${t('seeTimeline')}${glyph('chev')}</button>`:''}</section>`;
-}
-// Today (round 2): a tinted row for each care type that has a record today. With no record at all, no card.
-function todayCard() {
-  const o=dayTotals(0),c=diaCounts(0);
-  const rows=[['t-feed','feed',o.feeds&&feedTotalsText(o)],['t-sleep','sleep',sleepTotalsText(o)],['t-dia','diaper',(c.w||c.d)&&t('dayCounts',c.w,c.d)]].filter(r=>r[2]);
-  if(!rows.length)return '';
-  return `<section class="card"><h2>${t('today')}</h2><dl class="totals">${rows.map(([cls,word,text])=>`<div class="total ${cls}"><dt>${t(word)}</dt><dd${word==='diaper'?'':` data-day-total="${word}"`}>${joinUnits(text)}</dd></div>`).join('')}</dl><button type="button" class="textlink" data-act="tab" data-arg="log">${t('seeTimeline')}${glyph('chev')}</button></section>`;
+  const hasLink=rows.length||S.entries.length||feedRunning||sleepActive;
+  return `<section class="card"><h2>${t('latest')}</h2>${rows.length?`<ul>${rows.join('')}</ul>`:none}${hasLink?`<button type="button" class="textlink" data-r="R3" data-act="tab" data-arg="log">${t('seeTimeline')}${glyph('chev')}</button>`:''}</section>`;
 }
 // The ask row hides only when Chat has said it is unavailable. A check that fails leaves it showing.
 function homeNav() {
   const row=(act,arg,icon,label,mark='')=>`<li${mark?` data-r="${mark}"`:''}><button type="button" class="nav-row" data-act="${act}"${arg?` data-arg="${arg}"`:''}>${icon}${label}<span class="chev">${glyph('chev')}</span></button></li>`;
   return `<nav class="card nav" aria-label="${t('tabsAria')}"><ul>${row('tab','charts',glyph('chart'),t('tabCharts'))}${row('tab','photos',glyph('photo'),t('tabPhotos'))}${S.chat.available===false||!LittleDaysAPI.ai?'':row('ask-ai','',staticBunny(),esc(t('askRow',babyName())))}${row('open-more','',glyph('plus'),t('logElse'))}${row('open-settings','',glyph('gear'),t('settings'),'R3')}</ul></nav>`;
 }
-// R3: a handoff note and the next appointment show under Today, only when they exist.
+// R3: a handoff note and the next appointment show under Latest, only when they exist.
 function homeExtras() {
   const handoff=[...S.entries].reverse().find(e=>e.type==='note'&&e.title==='handoff');
   const note=S.dutyNote||handoff?.text||'',by=S.dutyNote?S.dutyNoteBy:(handoff?.by||''),sub=[by&&shownName(by),!S.dutyNote&&handoff&&clk(handoff.t)].filter(Boolean).join(' · ');
@@ -941,11 +1004,15 @@ function homeExtras() {
   return card+upcomingAppointmentsHTML();
 }
 function homeHTML() {
-  const today=todayCard(),runs=[shownRun()&&runCardHTML('feed'),shownRun(S.sleepRun)?runCardHTML('sleep'):S.sleepPaused&&runCardHTML('paused')].filter(Boolean);
-  const latest=latestCard(!today),extras=homeExtras(),empty=!runs.length&&latest.includes('latest-empty');
-  // Round 3, no record at all: Latest with "Nothing logged yet", no Today. Round 3 also drops the insight card here; the app keeps it (age facts do not need records) until the director says otherwise.
-  const body=empty&&!extras?latest:`<div class="group">${latest}${today}${extras}</div>`;
-  return `<div class="wrap">${homeHeader()}${runs.length?`<div class="group">${runs.join('')}</div>`:''}<section class="tiles" aria-label="${t('logAria')}">${tileHTML()}</section>${statusCard()}${body}${homeNav()}</div>`;
+  const runs=[shownRun()&&runCardHTML('feed'),shownRun(S.sleepRun)?runCardHTML('sleep'):S.sleepPaused&&runCardHTML('paused')].filter(Boolean);
+  const latest=latestCard(),extras=homeExtras(),empty=!runs.length&&latest.includes('latest-empty');
+  // Round 3, no record at all: Latest with "Nothing logged yet". Round 3 also drops the insight card here; the app keeps it (age facts do not need records) until the director says otherwise.
+  const body=empty&&!extras?latest:`<div class="group">${latest}${extras}</div>`;
+  // The Crying card (card C) joins the tiles in one group, and the cry question sits over the insight card (cry-ui.js).
+  const tiles=LittleDaysCryUI.homeTilesHTML(`<section class="tiles" aria-label="${t('logAria')}">${tileHTML()}</section>`);
+  const question=LittleDaysCryUI.askHTML(),insight=statusCard();
+  const first=homeHeader()+(runs.length?`<div class="group">${runs.join('')}</div>`:'')+tiles+(question||insight);
+  return `<div class="wrap"><div class="home-first">${first}</div>${question?insight:''}${body}${homeNav()}</div>`;
 }
 function themeRow(){const m=themeMode();return `<div class="theme-row"><span class="fl" id="theme-label">${t('themeTitle')}</span><div class="seg3" role="group" aria-labelledby="theme-label">${[['auto','themeAuto'],['on','themeOn'],['off','themeOff']].map(([k,w])=>`<button type="button" class="chip" data-act="theme" data-arg="${k}" aria-pressed="${m===k}">${ic('check','ck')}${t(w)}</button>`).join('')}</div><p>${t('themeHint')}</p></div>`;}
 function upcomingAppointmentsHTML(){
@@ -1057,9 +1124,9 @@ const tlSearchOpen=()=>!!S.searchOpen||!!S.search;
 // The search button sits at the right of the title bar and turns into a close button while the field is open (R5).
 const tlBarEnd=()=>`<button type="button" class="back only" data-act="search-toggle" data-r="R5" aria-label="${t(tlSearchOpen()?'tlCloseSearch':'searchShort')}" aria-expanded="${tlSearchOpen()}">${glyph(tlSearchOpen()?'close':'search')}</button>`;
 function timelineHTML() {
-  const q=(S.search||'').trim().toLowerCase(),open=tlSearchOpen(),chip=([id,word,cls])=>`<button type="button" class="chip ${cls}" data-act="filter" data-arg="${id}"${id==='other'?' data-r="R5"':''} aria-pressed="${S.filter===id}">${glyph('check')}${id==='all'?'':'<span class="dot"></span>'}${t(word)}</button>`;
+  const q=(S.search||'').trim().toLowerCase(),open=tlSearchOpen(),chip=([id,word,cls])=>`<button type="button" class="chip ${cls}" data-act="filter" data-arg="${id}"${id==='other'?' data-r="R5"':''} aria-pressed="${S.filter===id}">${id==='all'?'':'<span class="dot"></span>'}${t(word)}</button>`;
   const search=open?`<div class="tl-search" data-r="R5"><input class="field" type="search" data-fid="search" aria-label="${t('tlSearchLabel')}" placeholder="${t('searchShort')}" value="${esc(S.search||'')}" autocomplete="off" enterkeyhint="search"></div>`:'';
-  return `<div class="wrap">${search}<div class="chips" role="group" aria-label="${t('filter')}">${TL_CHIPS.map(chip).join('')}</div>${open?`<div class="wrap-results">${tlResults(q)}</div>`
+  return `<div class="wrap">${search}<div class="chips tl-chips" role="group" aria-label="${t('filter')}">${TL_CHIPS.map(chip).join('')}</div>${open?`<div class="wrap-results">${tlResults(q)}</div>`
     :`${tlDays().map(tlDay).join('')}<button type="button" class="textlink" data-act="earlier-day" data-r="R5">${t('tlEarlier')}${glyph('chev')}</button>`}</div>`;
 }
 // The day before the oldest one comes too: a sleep that began there gives each day its minutes after midnight. Each day is asked for once.
@@ -1462,7 +1529,7 @@ Object.assign(W,{
   wetDirty:['Wet and dirty','Pipí y popó'],
   onDutyRow:['On duty','En turno'],babyPhoto:['Baby photo','Foto del bebé'],
   kindL:['Kind','Clase'],typeL:['Type','Tipo'],moreVisit:['Doctor visit','Registro de consulta'],moreAppt:['Appointment','Cita con pediatra'],moreRemind:['Reminder','Programar un recordatorio'],
-  baby:['Baby','Bebé'],changePhoto:['Change photo','Cambiar foto'],weeksOld:[n=>`${n} ${n===1?'week':'weeks'} old`,n=>`${n} ${n===1?'semana':'semanas'}`],
+  baby:['Baby','Bebé'],changePhoto:['Change photo','Cambiar foto'],photoNotAllowed:['This account can no longer change the photo.','Esta cuenta ya no puede cambiar la foto.'],weeksOld:[n=>`${n} ${n===1?'week':'weeks'} old`,n=>`${n} ${n===1?'semana':'semanas'}`],
   unitsL:['Units','Unidades'],nightL:['Night','Noche'],dimSchedule:['Dim screen schedule','Horario de pantalla tenue'],careConn:['Care connection','Conexión de cuidado'],careConnected:['Connected','Conectado'],careNotConnected:['Not connected','No conectado'],
   runningSide:[(w,c)=>`${w} · ${c} running`,(w,c)=>`${w} · ${c} en curso`],
   confirmFeedSub:[(w,c)=>`${w} side · ${c}`,(w,c)=>`Lado ${w.toLowerCase()} · ${c}`],asleepFor:[d=>`Asleep for ${d}`,d=>`Durmiendo desde hace ${d}`],
@@ -1690,8 +1757,12 @@ function moreSheet() {
 function settingsSheet(s) {
   const portraitImg=S.portraitDraft?`<img class="mini-portrait" src="${esc(S.portraitDraft.url)}" alt="${esc(S.child?.name||'')}">`:S.child?.portrait?`<img class="mini-portrait" src="${esc(S.child.portrait)}" alt="${esc(S.child.name||'')}">`:LittleDaysBunny.svg('settings-bunny');
   const change=resourceAllowed('children','change')?`<label class="textlink portrait-upload">${t('changePhoto')}${glyph('chev')}<input class="portrait-file" type="file" accept="image/*" data-fid="portrait" aria-label="${t('changePhoto')}"></label>`:'';
-  const draft=S.portraitDraft?`<div class="portrait-tools"><span class="portrait-name">${esc(S.portraitDraft.name)}</span><button type="button" class="btn-primary" data-act="portrait-save"${S.photoBusy?' disabled aria-disabled="true"':''}>${t('save')}</button></div>`:'';
-  const err=S.photoBusy?`<p role="status" class="photo-prep">${t('photoPrep')}</p>`:S.portraitError?`<p role="alert">${photoErrorText(S.portraitError)}</p>`:'';
+  // No Save button: the pick saves itself. Retry shows only after an upload ended without saving, when the shared status bar has
+  // no Retry of its own (a lost request locks the sheet and retries from there). A waiting pick or an open upload has no Retry.
+  const pd=S.portraitDraft,mayChange=resourceAllowed('children','change'),sharedRetry=S.retryAction||S.pendingSheetOperation;
+  const failed=pd&&mayChange&&pd.tried&&!pd.saving&&!portraitOpen()&&!sharedRetry;
+  const draft=pd?`<div class="portrait-tools"><span class="portrait-name">${esc(pd.name)}</span>${!failed?'':`<button type="button" class="btn-primary" data-act="portrait-save"${S.photoBusy?' disabled aria-disabled="true"':''}>${t('retry')}</button>`}</div>`:'';
+  const err=S.photoBusy?`<p role="status" class="photo-prep">${t('photoPrep')}</p>`:pd&&!mayChange?`<p role="alert">${t('photoNotAllowed')}</p>`:S.portraitError?`<p role="alert">${photoErrorText(S.portraitError)}</p>`:'';
   const group=(title,inner,cls='')=>`<section class="day"><h2>${title}</h2><div class="card ${cls}">${inner}</div></section>`;
   const pick=(key,list,cur)=>`<div class="chips" role="group">${list.map(([v,w])=>`<button type="button" class="chip" data-setting="${key}" data-value="${v}" data-focus="setting-${key}-${v}" aria-pressed="${cur===v}">${glyph('check')}${w}</button>`).join('')}</div>`;
   const nav=(inner,attr)=>`<ul><li><button type="button" class="nav-row" ${attr}><span>${inner}</span><span class="chev">${glyph('chev')}</span></button></li></ul>`;
@@ -1701,25 +1772,14 @@ function settingsSheet(s) {
   const care=S.careData?.exportOptIn?t('careConnected'):t('careNotConnected');
   return sheetShell(t('settings'),`<div class="wrap-settings">
     ${group(t('onDutyRow'),`<div class="line"><strong>${esc(shownName(S.duty))}</strong><button type="button" class="textlink" data-act="duty" aria-label="${t('dutyAria')}">${t('change')}${glyph('chev')}</button></div>`)}
-    ${group(t('baby'),`<div class="row t-plain">${portraitImg}<div><strong>${esc(name)}</strong>${age?`<span class="sub">${age}</span>`:''}</div>${change}</div>${draft}${err}${growthChartSetting()}`)}
+    ${group(t('baby'),`<div class="row t-plain">${portraitImg}<div><strong>${esc(name)}</strong>${age?`<span class="sub">${age}</span>`:''}</div>${change}</div>${draft}${err}`)}
     ${group(t('language'),pick('lang',[['en','English'],['es','Español']],S.lang))}
     ${group(t('unitsL'),pick('units',[['metric','ml'],['us','oz']],unitsOf()))}
     ${group(t('nightL'),nav(`<strong>${t('dimSchedule')}</strong><span class="sub">${dimWord}</span>`,'data-act="night-open"'),'nav')}
     ${nightOpen?`<section class="card settings-card" data-night>${themeRow()}<button type="button" class="chip" data-setting="night" data-focus="setting-night" aria-pressed="${S.night}">${glyph('check')}${t('nightRules')}</button></section>`:''}
+    ${LittleDaysCryUI.settingsHTML()}
     ${LittleDaysAPI.careLink?group(t('careConn'),nav(`<strong class="conn">${S.careData?.exportOptIn?glyph('check'):''}${care}</strong>`,'data-act="open-care"'),'nav'):''}
     <section class="card settings-card"><p class="line">${t('signedInAs')} <strong class="account-name">${esc(shownName(S.me))}</strong></p><button type="button" class="back" data-extra data-shell="logout">${t('logout')}</button></section></div>`,null);
-}
-const canChooseGrowthChart=()=>S.child?.id&&resourceAllowed('children')&&resourceAllowed('weight')&&resourceAllowed('height');
-function growthChartSetting() {
-  if(!canChooseGrowthChart())return '';
-  const es=S.lang==='es', current=LittleDaysGrowthInsights.chartSex(S.preferences,S.child.id);
-  return choiceChips('growth-chart-sex',es?'Tabla de crecimiento de la OMS (opcional)':'WHO growth chart (optional)',
-    [['none',es?'Ninguna':'None'],['girls',es?'Niñas':'Girls'],['boys',es?'Niños':'Boys']],current||'none');
-}
-function saveGrowthChart(sex) {
-  if(!canChooseGrowthChart()||!['girls','boys','none'].includes(sex))return;
-  return persistPreferences({lang:S.lang,units:unitsOf(),palette:S.pal,night:S.night,
-    growthChart:sex==='none'?null:{childId:Number(S.child.id),sex}});
 }
 async function refreshCare() {
   S.careLoading=true;render();
@@ -1863,7 +1923,15 @@ function followFeedEnd(s,id){
   if(clock)clock.value=clock.hasAttribute('data-clock-numeric')?(s.hour?`${s.hour}:${s.minute}`:''):clockText(s.hour,s.minute,s.period);
   if(period)period.value=s.period;
 }
-function syncRange(id){const s=S.sheet;let len;followFeedEnd(s,id);
+// A typed feed Started later than now is last night's, as for Started earlier?, until the parent picks a Day (More details).
+// Owner, 2026-11-20: after midnight an 11:50 PM bottle read as tonight, so every feed form refused it as later than now.
+function followStartDay(s,id){
+  if(s.kind!=='feed'||s.dayEdited||!/^manual(Clock|Period)$/.test(id))return;
+  const at=startMinutes(dayISO(0),s.hour,s.minute,s.period);if(at===null)return;
+  const day=at>nowM()&&nowM()-(at-1440)<=720?dayISO(-1):dayISO(0);if(day===s.manualDate)return;
+  s.manualDate=day;const box=$('[data-fid="manualDate"]');if(box)box.value=day;
+}
+function syncRange(id){const s=S.sheet;let len;followStartDay(s,id);followFeedEnd(s,id);
   if(/^manualEnd(Clock|Period)$/.test(id))s.manualMinutesTyped=false;
   if(id==='manualDuration')s.manualMinutesTyped=true;
   if(s.kind==='feed'&&s.tab==='breast'&&s.manualMinutesTyped&&validNumber(s.manualDuration)&&/^(manualDuration|manualClock|manualPeriod)$/.test(id)){const start=startMinutes(s.manualDate,s.hour,s.minute,s.period);if(start!==null){const x=clockOf(start+ +s.manualDuration);Object.assign(s,{endHour:x.hh,endMinute:x.mm,endPeriod:x.period});const box=$('[data-fid="manualEndClock"]');if(box)box.value=`${x.hh}:${x.mm}`;}len=s.manualDuration;}
@@ -2065,7 +2133,14 @@ async function preparePhoto(picked){
   finally{clearTimeout(timer);if(S.photoPick===pick){S.photoBusy=false;S.photoOwner=null;}}
 }
 const photoErrorText=kind=>kind==='type'?t('photoType'):t('photoLimit');
-const writeErrorText=error=>error?.code==='photo_type'?t('photoType'):error?.code==='photo_size'?t('photoLimit'):error?.message||t('saveFailed');
+const writeErrorText=error=>error?.code==='photo_type'?t('photoType'):error?.code==='photo_size'?t('photoLimit'):error?.code==='sleep_overlap'&&error.conflicts?.length?sleepOverlapText(error.conflicts):error?.message||t('saveFailed');
+// "9:39 to 9:45 AM" / "9:39 a 9:45 a. m.", with the AM or PM on both times only when it changes. Non-breaking spaces keep each time on one line.
+function sleepSpanText(item){
+  const es=S.lang==='es',part=iso=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:LittleDaysZone.get(),hour:'numeric',minute:'2-digit',hour12:true}).formatToParts(new Date(iso)),v=k=>p.find(x=>x.type===k)?.value||'';return{hm:`${v('hour')}:${v('minute')}`,ap:v('dayPeriod').toUpperCase()};};
+  const a=part(item.start),b=part(item.end),ap=x=>'\u00a0'+(es?(x==='AM'?'a.\u00a0m.':'p.\u00a0m.'):x);
+  return `${a.hm}${a.ap===b.ap?'':ap(a.ap)} ${es?'a':'to'} ${b.hm}${ap(b.ap)}`;
+}
+function sleepOverlapText(conflicts){const spans=conflicts.map(sleepSpanText);return spans.length===1?t('sleepOverlapOne',spans[0]):t('sleepOverlapMany',spans.length,spans.join(S.lang==='es'?' y ':' and '));}
 async function recoverWrite(error,label,context={}){
   const owner=context.operationOwner;
   if(error?.status===401&&S.auth==='ready'){clearOperation(owner);context.release?.();context.onTerminal?.(error);await signInAgain(true);return;}
@@ -2073,7 +2148,8 @@ async function recoverWrite(error,label,context={}){
   if(error.status===409){const timerRejected=!!(owner?._preparedSwitch||owner?._preparedStop);if(timerRejected)clearOperation(owner);context.release?.();if(!context.sheet)context.onTerminal?.(error);S.pendingSheetOperation=timerRejected||!context.sheet?null:context.sheet;try{const state=await LittleDaysAPI.state();if(applyServerData(state)==='applied')resumePendingOperations(state.pendingOperations);}catch(_){}S.retrySame=null;S.retryAction=null;S.message=S.writeError=error.message||t('saveFailed');render();return;}
   if(!error.operationId){S.message=S.writeError=writeErrorText(error);render();return;}
   try{const result=await LittleDaysAPI.operation(error.operationId);await acceptWrite(result,label,{...context,operationId:error.operationId});}
-  catch(checkError){if(context.sheet?.kind==='split'&&checkError.knownTerminal){finalOperation({status:'failed',operationId:error.operationId,error:checkError.message},label,context);return;}if(checkError.status===404&&error.status!==409){context.release?.();S.retrySame=context.sheet||null;S.pendingSheetOperation=context.sheet||true;S.retryAction=context.retry||null;S.retryLabel=t('retry');S.message=t('retrySame');}
+  catch(checkError){// A refused split, or a save the check found refused for an overlap, is final: no Check again. An overlap names the saved sleep.
+    if(checkError.knownTerminal&&(context.sheet?.kind==='split'||checkError.code==='sleep_overlap')){finalOperation({status:'failed',operationId:error.operationId,error:checkError.message,code:checkError.code,conflicts:checkError.conflicts},label,context);return;}if(checkError.status===404&&error.status!==409){context.release?.();S.retrySame=context.sheet||null;S.pendingSheetOperation=context.sheet||true;S.retryAction=context.retry||null;S.retryLabel=t('retry');S.message=t('retrySame');}
     // Outcome unknown: keep the operation (and its release) so Check again can finish it.
     else{(S.pendingOps||={})[error.operationId]={label,context:{...context,operationId:error.operationId}};uncertainOperation(error.operationId,checkFailText(checkError));return;}
     render();}
@@ -2084,7 +2160,7 @@ function setToast(label,operationId,undoUntil=null,pending=false,extra={}){if(S.
   else if(deadline)toastTimer=setTimeout(()=>{if(S.toast?.k!==k)return;S.toast=null;if(S.pendingOps?.[operationId])S.message=t('saving');render();},remain);}
 // The Undo countdown and bar end at the server's deadline. When Undo ends, the plain success message takes over for a few seconds.
 const TOAST_MS=10000;
-function toastHTML(){const tt=S.toast;if(!tt)return '';if(tt.swipeUndo)return swipeToastHTML(tt);
+function toastHTML(){const tt=S.toast;if(!tt)return '';if(tt.swipeUndo)return swipeToastHTML(tt);if(tt.cryUndo)return LittleDaysCryUI.toastHTML(tt);
   const now=Date.now(),secs=ms=>Math.max(0,Math.ceil(ms/1000)),undo=canUndo(),edit=!undo&&tt.editId,deadline=undo?Date.parse(tt.undoUntil):tt.until;
   const timer=undo||edit?` <span class="cdn" aria-hidden="true" data-countdown="${deadline}" data-kind="${undo?'undo':'edit'}">${secs(deadline-now)} s</span>`:'';
   const btn=undo?`<button type="button" class="u" data-act="undo">${t('undo')}${timer}</button>`:edit?`<button type="button" class="u" data-act="edit" data-arg="${esc(tt.editId)}">${t('addDetails')}${timer}</button>`:'<span></span>';
@@ -2131,7 +2207,7 @@ function finalOperation(result,label,context={}){
     S.pendingSheetOperation=null;S.retrySame=null;S.retryAction=null;delete S.pendingOps[id];clearOwnToast(id);clearOperation(context.operationOwner);context.release?.();if(context.onTerminal)context.onTerminal(result);S.message='';render();return;
   }
   if(result.status==='failed'){
-    S.pendingSheetOperation=null;S.retrySame=null;S.retryAction=null;delete S.pendingOps[id];clearOwnToast(id);clearOperation(context.operationOwner);context.release?.();if(context.onTerminal)context.onTerminal(result);S.message=S.writeError=result.error||t('saveFailed');render();return;
+    S.pendingSheetOperation=null;S.retrySame=null;S.retryAction=null;delete S.pendingOps[id];clearOwnToast(id);clearOperation(context.operationOwner);context.release?.();if(context.onTerminal)context.onTerminal(result);S.message=S.writeError=writeErrorText({...result,message:result.error});render();return;
   }
 }
 function offerDetails(entryId,label){S.message='';setToast(label,null,null,false,{editId:entryId});}
@@ -2189,7 +2265,7 @@ async function acceptWrite(result,label,context={}){
   if(result.status==='saved'){finalOperation(result,label,context);return true;}
   if(result.status==='pending'||result.status==='finishing'){void pollOperation(result,label,context).catch(error=>{S.message=error.message||t('pollFailed');S.pendingSheetOperation=null;render();});return false;}
   if(result.status==='cancelled'){finalOperation(result,label,context);return false;}
-  if(result.status==='failed'){clearOperation(context.operationOwner);context.release?.();throw Object.assign(new Error(result.error||t('saveFailed')),{knownTerminal:true});}
+  if(result.status==='failed'){clearOperation(context.operationOwner);context.release?.();throw Object.assign(new Error(result.error||t('saveFailed')),{knownTerminal:true,code:result.code,conflicts:result.conflicts});}
   throw new Error(t('unknownSave'));
 }
 async function addEntries(list,label,photoFile=null,opts={}) {
@@ -2292,7 +2368,7 @@ async function save() {
   if(s.kind==='split')return saveSplit(s);
   if(s.kind==='diaper')return saveDiaper(s.type);if(s.kind==='feed')return saveFeed(s);if(s.kind==='sleep')return saveSleep(s);if(s.kind==='quick')return saveQuick(s);if(s.kind==='edit')return saveEdit(s);if(s.kind==='confirm')return confirmTimer(s);return saveOther(s);
 }
-async function saveCorrection(s){if(!validCorrection(s)||S.busy)return;const end=localISOAt(isoDay(s.date)*1440+((+s.hour%12)+(s.period==='PM'?12:0))*60 + +s.minute);S.busy=true;S.message=t('saving');render();try{const result=await LittleDaysAPI.writes.correctTimer(s.operationId,end);await acceptWrite(result,()=>t(s.parentOperationId?'savedSleep':'savedFeed'),{sheet:s,close:true,undoable:true,toast:true,operationOwner:s,onSaved:s.parentOperationId?()=>void checkOperationAgain(s.parentOperationId):null,onTerminal:s.parentOperationId?()=>void checkOperationAgain(s.parentOperationId):null});}catch(error){S.message=S.writeError=error.message||t('saveFailed');render();}finally{S.busy=false;render();}}
+async function saveCorrection(s){if(!validCorrection(s)||S.busy)return;const end=localISOAt(isoDay(s.date)*1440+((+s.hour%12)+(s.period==='PM'?12:0))*60 + +s.minute);S.busy=true;S.message=t('saving');render();try{const result=await LittleDaysAPI.writes.correctTimer(s.operationId,end);await acceptWrite(result,()=>t(s.parentOperationId?'savedSleep':'savedFeed'),{sheet:s,close:true,undoable:true,toast:true,operationOwner:s,onSaved:s.parentOperationId?()=>void checkOperationAgain(s.parentOperationId):null,onTerminal:s.parentOperationId?()=>void checkOperationAgain(s.parentOperationId):null});}catch(error){S.message=S.writeError=writeErrorText(error);render();}finally{S.busy=false;render();}}
 async function cancelCorrection(s){if(S.busy)return;if(s.parentOperationId){S.sheet=null;deferInterruptedSleep(s.parentOperationId);return;}const op=s._cancelOperation||(s._cancelOperation=crypto.randomUUID());S.busy=true;S.message=t('saving');render();try{const result=await LittleDaysAPI.writes.undo(s.operationId,op);await acceptWrite(result,()=>'',{sheet:s,close:true,undoable:false,toast:false,operationOwner:s});}catch(error){S.message=S.writeError=error.message||t('saveFailed');render();}finally{S.busy=false;render();}}
 function otherAdult(by){const who=personName(by)||String(by||'');return !!who&&who!==personName(S.me)&&who!==String(typeof S.me==='object'?S.me.id:'');}
 function activeTimer(kind){return kind==='feed'?S.run:kind==='sleep'?S.sleepRun:kind==='pump'?S.pumpRun:S.timers.find(x=>x.kind===kind)||null;}
@@ -2362,7 +2438,22 @@ function openSwitchTime(){if(S.sheet?._preparedSwitch||!shownRun()||!canStopRun(
 function switchFeed(confirmOther=false,side){const run=S.run;if(!run?.id){S.message=t('saveFailed');render();return;}const s=S.sheet;side=side||s?.nextFeed||(run.side==='L'?'R':'L');if(s?.early==='switch'&&earlyHint(s)){S.message=earlyHint(s);render();return;}if(run.side==='bottle'&&!bottleAmountOk(s)){S.message=t('hintAmount');render();return;}if(otherAdult(run.by)&&!confirmOther){if(s)s.nextFeed=side;S.sheet={kind:'confirm',act:'switch',nextFeed:side,by:personName(run.by)||run.by,draft:s};render();return;}const at=s?.early==='switch'?localISOAt(earlierMinutes(s)):undefined,owner=s||S,prepared=owner._preparedSwitch||(owner._preparedSwitch={id:run.id,side,note:s?.note||'',confirmOther,at,...(run.side==='bottle'?{amounts:{ml:s.ml,milk:s.milk}}:{})});return timerRequest(op=>requestSwitch(prepared,op),()=>t('started'),{close:true,undoable:false,toast:false,owner});}
 function executeTimer(action,confirmOther=false){if(action==='sleep-end-paused')return pausedSleepAction('end',confirmOther);if(action==='sleep-pause')return requestSleepAction('pause',confirmOther);if(action==='sleep-discard')return requestSleepAction('discard',confirmOther);if(action==='switch')return switchFeed(confirmOther);if(action==='sleepstop')return stopTimer('sleep',confirmOther);if(action==='pumpstop')return stopTimer('pump',confirmOther);return stopTimer('feed',confirmOther);}
 function confirmTimer(s){S.sheet=s.draft||null;return s.act==='switch'?switchFeed(true,s.nextFeed):executeTimer(s.act,true);}
-async function submitPortrait(){const draft=S.portraitDraft;if(!resourceAllowed('children','change')||!draft?.file||S.busy||S.photoBusy)return;S.busy=true;S.message=t('saving');render();const context={undoable:false,toast:false,operationOwner:draft,onSaved:()=>{URL.revokeObjectURL(draft.url);S.portraitDraft=null;},retry:()=>submitPortrait()};try{const op=draft._operationId||(draft._operationId=crypto.randomUUID()),result=await LittleDaysAPI.writes.savePortrait(draft.file,op);await acceptWrite(result,()=>t('portraitSaved'),context);}catch(error){await recoverWrite(error,()=>t('portraitSaved'),context);}finally{S.busy=false;render();}}
+// The portrait saves as soon as a pick is ready (owner, 2026-11-19: a separate Save tap was missed, so no photo ever saved).
+// One upload at a time: it is open from its PUT until the answer is final, a pending answer included (Codex r1). A pick made
+// while it is open, or while another request runs, waits and starts when nothing else runs, so an older pick's answer always
+// comes before a newer pick's. A failed upload keeps its draft and a Retry.
+// An operation the server sent back for the photo again (photoRetry) is not open: its Retry must be able to resend (Codex r2).
+// The same photo picked again is answered with the first pick's pending operation (server/photos.ts pendingDuplicate). The newer
+// draft adopts that id, so a check, Retry or saved answer for it belongs to the current draft (Codex r3).
+const samePortraitSave=draft=>{const d=S.portraitDraft;return !!d&&(d===draft||!!draft._operationId&&d._operationId===draft._operationId);};
+const portraitOpen=()=>!!S.portraitUploading||Object.values(S.pendingOps||{}).some(p=>p.context?.portrait&&!p.photoRetry);
+async function submitPortrait(){const draft=S.portraitDraft;if(!resourceAllowed('children','change')||!draft?.file||draft.saving||S.busy||S.photoBusy||portraitOpen())return;dropOlderPortrait(draft);draft.saving=true;draft.tried=true;S.portraitUploading=true;S.busy=true;S.message=t('saving');render();const context={portrait:true,undoable:false,toast:false,operationOwner:draft,onSaved:()=>{URL.revokeObjectURL(draft.url);if(samePortraitSave(draft))S.portraitDraft=null;},retry:Object.assign(()=>{if(samePortraitSave(draft))return submitPortrait();},{portraitDraft:draft})};try{const op=draft._operationId||(draft._operationId=crypto.randomUUID()),result=await LittleDaysAPI.writes.savePortrait(draft.file,op);if(result?.operationId&&result.operationId!==op)draft._operationId=result.operationId;await acceptWrite(result,()=>t('portraitSaved'),context);}catch(error){await recoverWrite(error,()=>t('portraitSaved'),context);}finally{draft.saving=false;S.portraitUploading=false;S.busy=false;render();}}
+// When an older pick failed and its Retry waits in the status bar, a newer waiting pick replaces it: the newer one is what the
+// parent wants, and the older Retry would send nothing (Codex r2).
+function dropOlderPortrait(d){const old=S.retryAction?.portraitDraft;if(!old||old===d)return;
+  S.retryAction=null;S.retrySame=null;S.pendingSheetOperation=null;S.message='';if(S.photoRetry&&S.photoRetry.operationId===old._operationId)S.photoRetry=null;
+  for(const [id,p] of Object.entries(S.pendingOps||{}))if(p.context?.operationOwner===old&&p.photoRetry)delete S.pendingOps[id];queueMicrotask(render);}
+function startWaitingPortrait(){const d=S.portraitDraft;if(d&&!d.tried&&!d.saving)dropOlderPortrait(d);if(d&&!d.tried&&!d.saving&&!S.busy&&!S.photoBusy&&!S.pendingSheetOperation&&!portraitOpen()&&resourceAllowed('children','change'))queueMicrotask(submitPortrait);}
 function saveUndo(){const toast=S.toast;if(!canUndo()||S.busy)return;const op=toast._undoOperationId||(toast._undoOperationId=crypto.randomUUID()),ctx={undoable:false,toast:false,clearToast:toast.undoId,operationOwner:toast,onSaved:()=>{const pending=S.pendingOps[toast.undoId];pending?.context?.release?.();clearOperation(pending?.context?.operationOwner);delete S.pendingOps[toast.undoId];pending?.context?.onTerminal?.({status:'cancelled'});},retry:()=>saveUndo()};S.busy=true;S.message=t('saving');render();LittleDaysAPI.writes.undo(toast.undoId,op).then(result=>acceptWrite(result.status==='cancelled'?{...result,status:'saved'}:result,()=>t('undone'),ctx)).catch(error=>recoverWrite(error,()=>t('undone'),ctx)).finally(()=>{S.busy=false;render();});}
 
 function formAction(a){switch(a){
@@ -2415,7 +2506,9 @@ function feedAction(a,arg){const s=S.sheet;if(measurementAction(a,arg))return tr
     case 'correct-side': s.correctedSide=arg;break;
     case 'save-side': void changeSide();break;
     case 'start': case 'switch': case 'stop': case 'pumpTimer': return false;
-    case 'manual': s.manual=!s.manual;dropClockText(s);if(s.manual){s.early=null;const c=currentClock();s.manualDate ||= dayISO(0);Object.assign(s,c,{endHour:c.hour,endMinute:c.minute,endPeriod:c.period,manualDuration:'0'});delete s.endEdited;}s.dirty=true;break;
+    // The clocks restart at now, so the Start is untouched again: a Day the parent did not pick restarts at today (followStartDay
+    // may have moved it; review r1), and earlier typing no longer steers Minutes or Ended (review r2). A picked Day keeps timeEdited.
+    case 'manual': s.manual=!s.manual;dropClockText(s);if(s.manual){s.early=null;const c=currentClock();delete s.manualMinutesTyped;if(s.dayEdited)s.manualDate ||= dayISO(0);else{s.manualDate=dayISO(0);delete s.timeEdited;}Object.assign(s,c,{endHour:c.hour,endMinute:c.minute,endPeriod:c.period,manualDuration:'0'});delete s.endEdited;}s.dirty=true;break;
     case 'manualSide': s.manualSide=arg;if(s.manual)s.dirty=true;break;
     case 'ml-set': setPreset(s,arg);break;
     case 'dkind': s.type=arg;s.dirty=true;break;
@@ -2503,7 +2596,6 @@ function stopGate(a){
 const BUSY_OK=new Set(['undo','swipe-undo']);
 // Actions that run one function and return its result. A table keeps act() under the complexity limit.
 const CALL_ACTS={
-  'growth-chart-sex':arg=>saveGrowthChart(arg),
   'ask-ai':()=>openChat(),
   'chat-back':()=>closeChat(),
   'ai-retry':arg=>submitChat(+arg),
@@ -2518,8 +2610,7 @@ const CALL_ACTS={
 };
 // The fact card's own actions. True when this action was one of them.
 function factAction(a,arg){
-  if(a==='fact-next'||a==='fact-previous'){factPaused=true;moveFact(a==='fact-next'?1:-1);return true;}
-  if(a==='fact-pause'){factPaused=!factPaused;render();return true;}
+  if(a==='fact-next'||a==='fact-previous'){moveFact(a==='fact-next'?1:-1);return true;}
   if(a==='fact-log'&&validDate(arg)){
     const day=Math.min(0,isoDay(arg));
     S.day=day;S.tab='log';S.search='';S.filter='all';render();
@@ -2529,7 +2620,7 @@ function factAction(a,arg){
   }
   return false;
 }
-function act(a,arg){const s=S.sheet;if(S.busy&&!BUSY_OK.has(a))return;
+function act(a,arg){if(a.startsWith('cry-')&&LittleDaysCryUI.handle(a,arg))return;const s=S.sheet;if(S.busy&&!BUSY_OK.has(a))return;
   if((a.startsWith('open-')||a==='quick')&&!S.retryAction&&!Object.keys(S.pendingOps||{}).length)S.message='';
   if(a==='quick'&&arg==='solids')queueMicrotask(()=>loadFoods());
   if(stopGate(a)||feedbackAction(a,arg)||factAction(a,arg))return;
@@ -2565,15 +2656,17 @@ function appHTML() {
   if(S.tab==='chat'&&!LittleDaysAPI.ai)S.tab='home';
   markFormClosed();settlePhotoBusy();settleConfirmStop();syncSwipeDelete();
   const sh=S.sheet?(S.sheet.kind==='cancelSleep'?cancelSleepSheet(S.sheet):SHEETS[S.sheet.kind](S.sheet)):'',toast=toastHTML();
-  const cls=(S.night?'app phone night':'app phone')+(S.sheet&&S.sheet.kind!=='discard'&&S.sheet.kind!=='confirm'?' form-open':'');
+  // The Crying screens and their questions sit on top of the app like a form (cry-ui.js).
+  const cry=LittleDaysCryUI.layerHTML(),cryOpen=LittleDaysCryUI.open();
+  const cls=(S.night?'app phone night':'app phone')+(S.sheet&&S.sheet.kind!=='discard'&&S.sheet.kind!=='confirm'||cryOpen?' form-open':'');
   const titles={log:'tabLog',charts:'tabCharts',photos:'tabPhotos',chat:'askAI'};
   // Every screen but Home has the same title bar. Ask keeps its own Home action (it puts focus back on the Ask button on Home) and a focusable title.
   const chat=S.tab==='chat',home=chat?'data-act="chat-back"':'data-act="tab" data-arg="home"',h1=chat?' id="chat-title" data-focus="chat-title" tabindex="-1"':'';
   const top=S.tab==='home'?'':`<header class="bar screen-top"><button type="button" class="back" ${home}>${glyph('back')}${t('tabHome')}</button><h1${h1}>${t(titles[S.tab]||'tabHome')}</h1>${S.tab==='log'?tlBarEnd():''}</header>`;
   // The chat scrolls its own thread, so it skips the shared scroll area and the dock.
   const screen=S.tab==='home'?homeHTML():S.tab==='log'?timelineHTML():S.tab==='charts'?chartsHTML():photosHTML();
-  const body=S.tab==='chat'?chatHTML():`<div class="scroll" data-scroll>${screen}</div>${S.tab==='home'&&!S.sheet?dockHTML():''}`;
-  return `<div class="${cls}" lang="${S.lang}"><input id="retry-photo-picker" type="file" accept="image/jpeg,image/png,image/webp" hidden><div class="main" ${S.sheet||S.confirmStop?'inert':''}>${top}${body}</div>${S.confirmStop?sh.replace('data-sheet','inert data-sheet'):sh}${toast}${confirmStopHTML()}</div>`;
+  const body=S.tab==='chat'?chatHTML():`<div class="scroll" data-scroll>${screen}</div>${S.tab==='home'&&!S.sheet&&!cryOpen?dockHTML():''}`;
+  return `<div class="${cls}" lang="${S.lang}"><input id="retry-photo-picker" type="file" accept="image/jpeg,image/png,image/webp" hidden><div class="main" ${S.sheet||S.confirmStop||cryOpen?'inert':''}>${top}${body}</div>${S.confirmStop||LittleDaysCryUI.sheetOpen()?sh.replace('data-sheet','inert data-sheet'):sh}${cry}${toast}${confirmStopHTML()}</div>`;
 }
 const keyOf = e => e && e.dataset ? (e.dataset.focus ? 'focus|' + e.dataset.focus : e.dataset.act ? e.dataset.act + '|' + (e.dataset.arg || '') : e.dataset.fid ? 'fid|' + e.dataset.fid : '') : '';
 // Skip the page behind an open sheet: the Home dock and the Sleep sheet both hold Stop sleep.
@@ -2701,6 +2794,7 @@ function keepOpenPickers(open){for(const old of open){const next=[...document.qu
 document.addEventListener('click',ev=>{if(ev.target?.type==='file')ev.target._picking=true;},true);
 document.addEventListener('cancel',ev=>{if(ev.target?.type==='file')S.overlayClosedAt=performance.now();},true);
 function render() {
+  LittleDaysCryUI.checkOwner();  // each sign-in, switch and sign-out stops the last adult's cry queues and recordings
   queueMicrotask(syncFactCarousel);
   if(chartDrag){S.chartDirty=true;return;}
   if(factSwipe&&S.auth==='ready'&&S.tab==='home'){factRedraw='full';return;}
@@ -2723,7 +2817,7 @@ function render() {
   const sc2 = $('[data-scroll]'); if (sc2) sc2.scrollTop = st;
   LittleDaysBunny.scan();
   const sb2 = $('.sh-body,.formscreen'); if (sb2 && hadSheet) sb2.scrollTop = sbt;
-  if(S.busy||S.pendingSheetOperation){document.querySelectorAll('[data-sheet] input,[data-sheet] select,[data-sheet] textarea,[data-sheet] button').forEach(el=>{if(!S.busy&&!hasUnresolvedSheet(S.sheet)&&el.matches('[data-act="delete-entry"]')||el.closest('.settings-card')||el.matches('[data-act="retry-write"]'))return;const retrying=S.retrySame&&(S.retrySame===S.sheet||S.sheet?.kind==='discard'&&S.sheet.draft===S.retrySame),retrySave=retrying&&el.matches('[data-act="save"]'),discardControl=retrying&&['cancel','keep','discard'].includes(el.dataset.act);if(!retrySave&&!discardControl&&!el.matches('[data-act="undo"]'))el.disabled=true;});}
+  if(S.busy||S.pendingSheetOperation){document.querySelectorAll('[data-sheet] input,[data-sheet] select,[data-sheet] textarea,[data-sheet] button').forEach(el=>{if(!S.busy&&!hasUnresolvedSheet(S.sheet)&&el.matches('[data-act="delete-entry"]')||el.closest('.settings-card')||el.matches('[data-act="retry-write"]')||el.matches('.portrait-file')&&portraitOpen()&&!S.pendingSheetOperation)return;const retrying=S.retrySame&&(S.retrySame===S.sheet||S.sheet?.kind==='discard'&&S.sheet.draft===S.retrySame),retrySave=retrying&&el.matches('[data-act="save"]'),discardControl=retrying&&['cancel','keep','discard'].includes(el.dataset.act);if(!retrySave&&!discardControl&&!el.matches('[data-act="undo"]'))el.disabled=true;});}
   const kind = S.sheet ? S.sheet.kind : null;
   if (kind && kind !== lastSheetKind) { const c = $('[data-sheet] [data-act="cancel"]') || $('[data-sheet] button:not([disabled])'); if (c) c.focus({preventScroll: true}); }   // a new sheet starts on Cancel; a confirm with no Cancel starts on its first button
   else if (!kind && lastSheetKind && S.opener) { const o = byKey(S.opener); S.opener = null; if (o) o.focus({preventScroll: true}); }  // closing returns to the button that opened it
@@ -2732,6 +2826,7 @@ function render() {
   if(S.tab==='chat')fitChatField();
   lastSheetKind = kind;
   lastConfirm = !!S.confirmStop;
+  startWaitingPortrait();  // every request ends with a render, so a waiting portrait pick starts as soon as nothing else runs
   // A redraw of the same notice or question settles immediately; only a new one enters.
   if(hadApp&&!keyboardInput&&!factMotion.matches&&!document.hidden){
     for(const el of document.querySelectorAll('.bsheet,.overlay .confirm,.toast')){
@@ -2755,7 +2850,7 @@ document.addEventListener('click', ev => {
 async function retrySelectedPhoto(file){const retry=S.photoRetry;if(!retry||!file)return;file=await preparePhoto(file);if(!file)return;const problem=photoProblem(file);if(problem){S.message=photoErrorText(problem);render();return;}const owner={_operationId:retry.operationId,_preparedEvents:retry.event?[retry.event]:[]},context={operationOwner:owner,undoable:false,toast:false,retry:()=>document.querySelector('#retry-photo-picker')?.click()};S.busy=true;S.pendingSheetOperation=null;S.message=t('saving');render();try{const result=retry.portrait?await LittleDaysAPI.writes.savePortrait(file,retry.operationId):await LittleDaysAPI.writes.savePhoto(retry.event,file,retry.operationId);await acceptWrite(result,()=>retry.portrait?t('portraitSaved'):t('savedItem',t('note')),context);if(result.status==='saved')S.photoRetry=null;}catch(error){await recoverWrite(error,()=>t('savedItem',t('note')),context);}finally{S.busy=false;render();}}
 async function readPhoto(target){const picked=target.files?.[0],id=target.dataset.fid;S.overlayClosedAt=performance.now();target._picking=false;if(target.id!=='retry-photo-picker')target.value='';if(target.id==='retry-photo-picker'){void retrySelectedPhoto(picked);target.value='';return;}if(!picked||id==='portrait'&&!resourceAllowed('children','change'))return;const draft=S.sheet,f=await preparePhoto(picked);if(!f)return;const problem=photoProblem(f);if(problem){if(id==='portrait')S.portraitError=problem;else if(S.sheet)S.sheet.photoError=problem;requestAnimationFrame(render);return;}
   let preview;try{preview=URL.createObjectURL(f);}catch(_){if(id==='portrait')S.portraitError=true;else if(S.sheet===draft)draft.photoError=true;requestAnimationFrame(render);return;}
-  if(id==='portrait'){S.portraitDraft={file:f,url:preview,name:f.name};S.portraitError=false;requestAnimationFrame(render);return;}
+  if(id==='portrait'){S.portraitDraft={file:f,url:preview,name:f.name};S.portraitError=false;requestAnimationFrame(render);void submitPortrait();return;}
   if(S.sheet!==draft){URL.revokeObjectURL(preview);return;}if(draft.photo?.startsWith?.('blob:'))URL.revokeObjectURL(draft.photo);draft.photo=preview;draft.photoFile=f;draft.photoName=f.name;draft.photoRemoved=false;draft.photoError=false;draft.dirty=true;requestAnimationFrame(render);
 }
 const SAVE_VALIDATORS={
@@ -2784,6 +2879,7 @@ function updateInput(id,value){if(id==='valueCol'){const w=$('[data-col-warn]');
   if(/Clock$/.test(id))readClock(id.slice(0,-5),value,{...cm,wokeHour:'wokeHour',wokeMinute:'wokeMinute',wokePeriod:'wokePeriod',sleptHour:'sleptHour',sleptMinute:'sleptMinute',sleptPeriod:'sleptPeriod'});
   if(['ml','pL','pR'].includes(id)){S.sheet[id]=typedMl(value,S.sheet.vu);S.sheet[id+'Text']=value;}
   if(['manualDate','manualClock','manualPeriod','manualEndClock','manualEndPeriod'].includes(id))S.sheet.timeEdited=true;
+  if(id==='manualDate')S.sheet.dayEdited=true;
   syncRange(id);
   document.querySelectorAll('[data-act="clock-period"]').forEach(button=>{const [prefix,period]=button.dataset.arg.split(':');button.setAttribute('aria-pressed',String(S.sheet[CLOCK_KEYS[prefix][2]]===period));});
   if(/^care(Start|End)(Date|Clock|Period)$/.test(id))updateCareClock(id);
@@ -2824,7 +2920,7 @@ function pollFamily(){
 }
 function tick() {  // reload shared family state while preserving the open form and filters.
   if(S.auth!=='ready'||document.hidden)return;
-  refreshHomeEvidence();
+  refreshHomeEvidence();LittleDaysCryUI.tick();
   if(pollFamily())return;
   if (!S.sheet && !S.toast && !chartDrag) render();
 }
@@ -2839,14 +2935,7 @@ function updateDayTotals(){
   if(minute===totalsMinute)return;
   totalsMinute=minute;
   if(!S.run&&!S.sleepRun)return;
-  const o=dayTotals(0);
-  for(const [kind,text] of [['feed',feedTotalsText(o)],['sleep',sleepTotalsText(o)]]){
-    const el=$(`[data-day-total="${kind}"]`);
-    if(el)el.textContent=joinUnits(text);
-  }
   updateTimelineTotals();
-  // A part that becomes non-zero adds its Today row, so Home draws again once.
-  if($('.tiles')&&(todayCard().match(/class="total /g)||[]).length!==document.querySelectorAll('.totals .total').length)render();
 }
 function updateTimerDisplays(){if(document.hidden)return;updateDayTotals();document.querySelectorAll('[data-live="run"]').forEach(e=>{if(S.run)e.textContent=mmss(timerElapsed(S.run));});document.querySelectorAll('[data-live="runclock"]').forEach(e=>{if(S.run)e.textContent=runClock(timerElapsed(S.run));});document.querySelectorAll('[data-live="sleep"]').forEach(e=>{if(S.sleepRun)e.textContent=mmss(timerElapsed(S.sleepRun));});document.querySelectorAll('[data-live="pump"]').forEach(e=>{if(S.pumpRun)e.textContent=mmss(timerElapsed(S.pumpRun));});}
 setInterval(updateTimerDisplays,1000);

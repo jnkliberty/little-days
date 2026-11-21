@@ -23,7 +23,7 @@ globalThis.LittleDaysPersonalTrends = (() => {
     return dates?.date(dates.earlier[0] - 1);
   }
 
-  function pool({entries, child, today, nowMinutes, readDates, permissions, lang, units, handoffAt} = {}) {
+  function pool({entries, child, today, nowMinutes, readDates, permissions, lang, units} = {}) {
     const dates = calendar(today);
     if (!dates || !Number.isFinite(nowMinutes) || nowMinutes < 0 || nowMinutes >= DAY || !readDates?.has(today)) return [];
     const {sleepWithin, sleepEnd, feedSessionKey, DAY_START, NIGHT_START, WINDOW} = LittleDaysTrends;
@@ -31,11 +31,24 @@ globalThis.LittleDaysPersonalTrends = (() => {
     const locale = text('en-US', 'es-MX');
     const numbers = new Intl.NumberFormat(locale, {maximumFractionDigits:1});
     const clocks = new Intl.DateTimeFormat(locale, {timeZone:'UTC', hour:'numeric', minute:'2-digit', hour12:true});
-    const months = new Intl.DateTimeFormat(locale, {timeZone:'UTC', month:'long', year:'numeric'});
-    const clock = minute => clocks.format(Math.floor(minute) * 60000);
+    // Spanish clock times read "10:23 p. m." (some ICU versions give "p.m.") with non-breaking spaces, so a time never breaks across lines.
+    // English ICU already puts a no-break space before AM and PM.
+    const clock = minute => { const time = clocks.format(Math.floor(minute) * 60000); return es ? time.replace(/\s?([ap])\.\s?m\./, "\u00a0$1.\u00a0m.") : time; };
+    const weekdays = new Intl.DateTimeFormat(locale, {timeZone:'UTC', weekday:'narrow'});
+    const shortDates = new Intl.DateTimeFormat(locale, {timeZone:'UTC', month:'short', day:'numeric'});
+    const shortDate = day => shortDates.format(new Date(dates.date(day))).replace('.', '');
     const number = value => numbers.format(value);
-    const minutes = value => number(value) + ' min';
-    const volume = value => units === 'us' ? number(value / 29.5735) + ' oz' : number(value) + ' mL';
+    // Sleep reads as hours and minutes ("14 h 7 min"), not as a count of minutes (owner, 2026-11-18).
+    const minutes = value => {
+      const whole = Math.round(value), hours = Math.floor(whole / 60), rest = whole % 60;
+      return hours ? (rest ? `${hours} h ${rest} min` : `${hours} h`) : `${rest} min`;
+    };
+    // mL reads as a whole number and oz keeps one decimal (owner, 2026-11-19). Each amount is rounded once, here, from the
+    // unrounded value; Intl rounds a half up, so 52.5 mL reads "53 mL".
+    const wholes = new Intl.NumberFormat(locale, {maximumFractionDigits:0});
+    // Floating point turns 64.1 - 63.6 into 0.4999999999999929; clearing the noise below 1e-6 first lets that half round up (Codex r1).
+    const volumeNumber = ml => units === 'us' ? number(ml / 29.5735) : wholes.format(Math.round(ml * 1e6) / 1e6);
+    const volume = value => volumeNumber(value) + (units === 'us' ? ' oz' : ' mL');
     const allowed = name => permissions?.resources?.[name]?.view === true;
     const dayOf = minute => Math.floor(minute / DAY);
     const firstDay = dates.earlier[0] - 1;
@@ -71,9 +84,10 @@ globalThis.LittleDaysPersonalTrends = (() => {
       .map(group => group.filter(entry => includes(entry, start, end, inclusive) && (!inclusive || feedEnd(entry) <= end)))
       .filter(group => group.length);
     const cards = [];
-    const add = (topic, window, title, body, evidence) => {
+    // `look` is the card's graph: {headline, note, viz}. The body stays the full sentence (Ask and screen readers use it).
+    const add = (topic, window, title, body, evidence, look = {}) => {
       const unique = [...new Map(evidence.map(entry => [entry.id, entry])).values()].sort((a,b) => b.t - a.t);
-      cards.push({id:`trend:${topic}:${window}:${today}`, kind:'record', topic, title, body,
+      cards.push({id:`trend:${topic}:${window}:${today}`, kind:'record', topic, title, body, ...look,
         evidence:unique.map(entry => ({kind:'record',id:entry.id,label:text('View record','Ver registro'),date:dates.date(dayOf(entry.t))}))});
     };
     const metrics = [
@@ -83,6 +97,8 @@ globalThis.LittleDaysPersonalTrends = (() => {
           return {value:selected.length, evidence:selected.flat()};
         }},
       {topic:'diapers', name:text('Diaper changes','Cambios de pañal'), noun:text(['diaper change','diaper changes'],['cambio de pañal','cambios de pañal']), format:number, has:diapers.length,
+        // The Spanish card title and its one-line note use the short words ("Pañales a esta hora", "8 cambios"), card mix 2026-11-19.
+        short:text('Diaper changes','Pañales'), shortNoun:text(['diaper change','diaper changes'],['cambio','cambios']),
         measure(start, end, inclusive) {
           const evidence = diapers.filter(entry => includes(entry, start, end, inclusive));
           return {value:evidence.length, evidence};
@@ -101,71 +117,124 @@ globalThis.LittleDaysPersonalTrends = (() => {
     const evidenceFor = days => days.flatMap(day => day?.evidence || []);
     const valuesOf = days => days.map(day => day.value);
     const byHour = text(`By ${clock(nowMinutes)}`, `Hasta las ${clock(nowMinutes)}`);
+    const byClock = text(`by ${clock(nowMinutes)}`, `hasta las ${clock(nowMinutes)}`);
+    // A sentence that ends on a clock time ("10:23 p.m.") gets no second period.
+    const close = sentence => sentence.endsWith('.') ? sentence : sentence + '.';
+    // Sleep compares the rounded minutes that the card shows, so "1 h" and "1 h" never differ by "1 min". Time is "less", a count is "fewer".
+    const gap = (current, past, format) => format === minutes ? Math.round(current) - Math.round(past) : current - past;
     function difference(current, past, format) {
-      const delta = current - past, amount = format(Math.abs(delta));
+      const delta = gap(current, past, format), amount = format(Math.abs(delta));
       if (amount === format(0)) return text('no change','sin cambio');
-      return delta > 0 ? text(`${amount} more`, `${amount} más`) : text(`${amount} fewer`, `${amount} menos`);
+      return delta > 0 ? text(`${amount} more`, `${amount} más`) : text(`${amount} ${format === minutes ? 'less' : 'fewer'}`, `${amount} menos`);
+    }
+    // An amount with its unit: "32 min", "1 feed", "2 diaper changes".
+    const counted = (value, format, noun) => noun ? `${format(value)} ${noun[Number(value !== 1)]}` : format(value);
+
+    // The headline of a by-this-time card is a verdict against the drawn past days, in neutral words (owner, 2026-11-19).
+    // It never says low, high, good, bad or normal: this is not medical advice.
+    // With gaps (fewer past days with records than days in the window) it names "the days with records".
+    function verdictDays(n, gaps) {
+      if (n === 1) return gaps ? [text('the day with records', 'el día con registros')] : [text('the last day', 'el último día')];
+      return gaps ? [text(`each of the ${n} days with records`, `cada uno de los ${n} días con registros`), text(`any of the ${n} days with records`, `cualquiera de los ${n} días con registros`)]
+        : [text(`each of the last ${n} days`, `cada uno de los últimos ${n} días`), text(`any of the last ${n} days`, `cualquiera de los últimos ${n} días`)];
+    }
+    function verdict(today, past, format, windowDays) {
+      const round = format === minutes ? Math.round : value => value;
+      const shown = past.map(round), now = round(today), low = Math.min(...shown), high = Math.max(...shown);
+      // One past day with no gaps (a newborn's first week) reads "the last day", never "the last 1 days".
+      const days = verdictDays(past.length, past.length < windowDays);
+      if (low === high && now === low) return {same:true, headline:text(`Same as ${days[0]}`, `Igual que ${days[0]}`)};
+      if (now < low) return {headline:text(`Less than ${days.at(-1)}`, `Menos que ${days.at(-1)}`)};
+      if (now > high) return {headline:text(`More than ${days.at(-1)}`, `Más que ${days.at(-1)}`)};
+      return {headline:text('About usual', 'Cerca de lo usual')};
+    }
+    // The gray line under the verdict: the amount and the clock time.
+    // One line (card mix, 2026-11-19): the title already says "by this time", so the note leaves out the clock time.
+    function usualNote(today, usual, format, noun) {
+      const delta = gap(today, usual, format), amount = counted(Math.abs(delta), format, noun), typical = format(usual);
+      if (format(Math.abs(delta)) === format(0)) return text(`The usual is ${typical}`, `Lo usual es ${typical}.`);
+      // Spanish reads as two short sentences, so no number stands alone between commas.
+      const spanish = `${amount} ${delta < 0 ? 'menos' : 'más'}. Lo usual es ${typical}.`;
+      return text(`${amount} ${delta < 0 ? 'under' : 'over'} the usual ${typical}`, spanish);
+    }
+    function baselineLook(daily, days, eligible, weekCount, metric) {
+      const values = valuesOf(eligible);
+      // A duration draws the rounded minutes that the note and the verdict use (review, 2026-11-19).
+      // A count is whole too (owner, 2026-11-19): the median of an even count of days (9.5) reads 10, a half rounds up.
+      const {format, noun} = metric, round = Math.round;
+      const usual = round(median(values)), {same, headline} = verdict(daily.value, values, format, weekCount);
+      if (same) return {headline, note:`${counted(daily.value, format, metric.shortNoun || noun)} ${byClock}`};
+      return {headline, note:usualNote(daily.value, usual, format, noun),
+        viz:{kind:'columns', usual, floor:format === minutes ? 0 : 2, days:weekCount, usualLabel:text('usual','lo usual'), span:weekCount === 1 ? text('Last day', 'Último día') : text(`Last ${weekCount} days`, `Últimos ${weekCount} días`),
+          todayLabel:text('Today','Hoy'), bars:[...days.map(day => ({value:eligible.includes(day) ? round(day.value) : null})), {value:round(daily.value), today:true}]}};
+    }
+    // The today card, used only when there is no by-this-time card: today against yesterday at the same clock time.
+    function dayLook(daily, yesterday, metric) {
+      const {format, noun} = metric, delta = gap(daily.value, yesterday.value, format), amount = counted(Math.abs(delta), format, noun);
+      const headline = format(Math.abs(delta)) === format(0) ? text('Same as yesterday', 'Igual que ayer')
+        : delta > 0 ? text(`${amount} more than yesterday`, `${amount} más que ayer`)
+          : text(`${amount} ${format === minutes ? 'less' : 'fewer'} than yesterday`, `${amount} menos que ayer`);
+      const past = counted(yesterday.value, format, noun);
+      return {headline, note:text(`Yesterday ${byClock}: ${past}.`, `Ayer ${byClock}: ${past}.`),
+        viz:{kind:'columns', bars:[{label:text('Yesterday','Ayer'), value:yesterday.value}, {label:text('Today','Hoy'), value:daily.value, today:true}]}};
     }
 
-    const longer = [];
     for (const metric of metrics.filter(item => item.has)) {
       const {topic, name, noun, format} = metric;
       const [daily, yesterday] = samples(metric, [0,-1], nowMinutes);
       if (daily?.value) {
         const current = format(daily.value), past = yesterday?.value ? format(yesterday.value) : null;
-        const days = samples(metric, week.filter(fromBirth), nowMinutes);
-        const eligible = days.filter(day => day?.value > 0), values = valuesOf(eligible);
+        const value = noun ? `${current} ${noun[Number(daily.value !== 1)]}` : current;
+        const weekDays = week.filter(fromBirth);
+        const days = samples(metric, weekDays, nowMinutes);
+        // A day has a record when it has a value or evidence; a recorded value that rounds to 0 still counts and draws (review, 2026-11-19).
+        const recorded = day => Boolean(day) && (day.value > 0 || day.evidence?.length > 0);
+        const eligible = days.filter(recorded), values = valuesOf(eligible);
+        // One card per care type: the today card is only the fallback when there is no by-this-time card (owner, 2026-11-19).
         if (days.every(Boolean) && values.length) {
-          const usual = format(median(values)), low = format(Math.min(...values)), high = format(Math.max(...values));
+          const usual = format(Math.round(median(values))), low = format(Math.min(...values)), high = format(Math.max(...values));
           const count = values.length, dayLabel = count === 1 ? text('day','día') : text('days','días');
-          add(topic, 'baseline', text(`${name} by this time`, `${name} a esta hora`),
+          add(topic, 'baseline', text(`${name} by this time`, `${metric.short || name} a esta hora`),
             text(`${byHour}, ${current} logged today. Last week, median ${usual}, range ${low} to ${high} across ${count} ${dayLabel} with logs by this time.`,
               `${byHour}, ${current} en el registro de hoy. La última semana, mediana ${usual}, rango de ${low} a ${high} en ${count} ${dayLabel} con registros a esta hora.`),
-            [...daily.evidence, ...evidenceFor(eligible)]);
+            [...daily.evidence, ...evidenceFor(eligible)], baselineLook(daily, days, eligible, weekDays.length, metric));
+        } else {
+          const logged = text(`${byHour}, ${value} logged today`, `${byHour}, ${value} en el registro de hoy`);
+          const change = past && difference(daily.value, yesterday.value, format);
+          add(topic, 'day', text(`${name} today`, `${name} hoy`), past
+            ? text(`${logged} and ${past} yesterday (${change}).`, `${logged} y ${past} ayer (${change}).`) : logged + '.',
+            [...daily.evidence, ...(past ? yesterday.evidence : [])],
+            past ? dayLook(daily, yesterday, metric)
+              : {headline:value, note:validRead(-1, metric.prior) ? text('Nothing logged yesterday by this time.', 'Nada en el registro de ayer a esta hora.') : ''});
         }
-        const value = noun ? `${current} ${noun[Number(daily.value !== 1)]}` : current;
-        const logged = text(`${byHour}, ${value} logged today`, `${byHour}, ${value} en el registro de hoy`);
-        const change = past && difference(daily.value, yesterday.value, format);
-        add(topic, 'day', text(`${name} today`, `${name} hoy`), past
-          ? text(`${logged} and ${past} yesterday (${change}).`, `${logged} y ${past} ayer (${change}).`) : logged + '.',
-          [...daily.evidence, ...(past ? yesterday.evidence : [])]);
       }
 
-      longer.push(() => {
-        function coverage(window, days, label) {
-          if (!days.every(Boolean)) return;
-          const count = days.filter(day => day.value > 0).length, total = days.length;
-          if (!count || count === total) return;
-          add(topic, window, `${name} · ${label}`, text(`${name} logged on ${count} of ${total} days.`,
-            `${name} en el registro de ${count} de ${total} días.`), evidenceFor(days));
-        }
-        function compare(window, left, right, first, second) {
-          const current = average(valuesOf(left)), past = average(valuesOf(right));
-          const change = difference(current, past, format);
-          add(topic, window, text(`${name} per day`, `${name} por día`),
-            text(`${format(current)} logged per day ${first} and ${format(past)} ${second} (${change} per day).`,
-              `${format(current)} por día en el registro de ${first} y ${format(past)} en ${second} (${change} por día).`), evidenceFor([...left,...right]));
-        }
-        const recent = samples(metric, week), previous = samples(metric, earlierWeek);
-        const weekLabel = text('Last 7 finished days','Últimos 7 días completos');
-        if (complete(recent)) {
-          const daily = format(average(valuesOf(recent)));
-          add(topic, 'seven', `${name} · ${weekLabel}`,
-            text(`${daily} logged per day over the last 7 finished days.`, `${daily} por día en el registro de los últimos 7 días completos.`), evidenceFor(recent));
-          if (complete(previous)) compare('week', recent, previous, text('over the last 7 finished days','los últimos 7 días completos'),
-            text('over the preceding 7 days','los 7 días anteriores'));
-        } else {
-          coverage('seven', recent, weekLabel);
-        }
-        const recentMonth = samples(metric, dates.month), earlierMonth = samples(metric, dates.earlier);
-        const [first, second] = [dates.month, dates.earlier].map(days => months.format(new Date(dates.date(days[0]))));
-        if (complete(recentMonth) && complete(earlierMonth)) {
-          compare('month', recentMonth, earlierMonth, text('in ' + first, first), text('in ' + second, second));
-        } else {
-          coverage('month-coverage', recentMonth, first);
-          coverage('previous-month-coverage', earlierMonth, second);
-        }
-      });
+    }
+
+    // Last 7 days (card mix, owner, 2026-11-19): one card with a row per care type that has all 7 finished days.
+    // It replaces the three "Last 7 finished days" cards, the week and month comparisons and the coverage cards.
+    // The change against the 7 days before shows only when that week is complete too (14 finished days).
+    const TONES = {feeds:'c-feed', diapers:'c-dia', sleep:'c-sleep'};
+    function weekRow(metric) {
+      const recent = samples(metric, week), previous = samples(metric, earlierWeek);
+      if (!complete(recent)) return null;
+      const {name, format} = metric, round = format === minutes ? Math.round : value => Math.round(value * 10) / 10;
+      // The change comes from the unrounded averages and is rounded once (review r1, 2026-11-19).
+      const exact = average(valuesOf(recent)), now = round(exact), delta = complete(previous) ? round(exact - average(valuesOf(previous))) : null;
+      const avg = text(`${format(now)} a day`, `${format(now)} al día`), amount = delta === null ? '' : format(Math.abs(delta));
+      const change = delta === null ? '' : delta === 0 ? '0' : `${delta > 0 ? '+' : '−'}${amount}`;
+      const more = delta > 0 ? text(`${amount} more`, `${amount} más`) : text(`${amount} ${format === minutes ? 'less' : 'fewer'}`, `${amount} menos`);
+      const compared = delta === null ? '' : delta === 0 ? text(' (the same as the 7 days before)', ' (igual que los 7 días anteriores)')
+        : text(` (${more} than the 7 days before)`, ` (${more} que los 7 días anteriores)`);
+      return {tone:TONES[metric.topic], name, avg, change, days:valuesOf(recent).map(round), evidence:evidenceFor(delta === null ? recent : [...recent, ...previous]),
+        label:text(`${name}: ${avg} over the last 7 days${compared}.`, `${name}: ${avg} en los últimos 7 días${compared}.`)};
+    }
+    const weekRows = metrics.filter(item => item.has).map(weekRow).filter(Boolean);
+    if (weekRows.length) {
+      const changed = weekRows.some(row => row.change);
+      add('week', 'seven', text('Last 7 days', 'Últimos 7 días'), weekRows.map(row => row.label).join(' '), weekRows.flatMap(row => row.evidence),
+        {viz:{kind:'week', change:changed, head:text('vs. the week before', 'vs. semana anterior'),
+          rows:weekRows.map(({evidence, ...row}) => row)}});
     }
 
     const currentBottles = bottles.filter(entry => entry.t >= 0 && feedEnd(entry) <= nowMinutes);
@@ -193,50 +262,104 @@ globalThis.LittleDaysPersonalTrends = (() => {
       const change = comparing && difference(total(currentBottles), total(priorBottles), volume);
       const past = comparing ? text(` Yesterday, ${breakdown(priorBottles)} at that time (${change} today).`,
         ` Ayer, ${breakdown(priorBottles)} a esa hora (${change} hoy).`) : '';
-      add('bottles', 'breakdown', text('Bottle volumes','Volumen de los biberones'), current + past + nurseNote,
-        [...currentBottles, ...(comparing ? priorBottles : []), ...nursing.flat()]);
+      const bottlesN = currentBottles.length, missing = currentBottles.filter(entry => !hasAmount(entry)).length;
+      // The headline counts every bottle, measured or not; the mL total and yesterday stay in the body sentence (owner, 2026-11-19).
+      // Spanish "7 biberones · 2 al pecho" wraps at 320 px, so in Spanish the nursing count moves to the note, beside its dot.
+      const headline = [text(`${bottlesN} ${bottlesN === 1 ? 'bottle' : 'bottles'}`, `${bottlesN} ${bottlesN === 1 ? 'biberón' : 'biberones'}`),
+        count && text(`${count} nursing`, '')].filter(Boolean).join(' · ');
+      const notes = [
+        count && text('Nursing.', `${count} al pecho.`),
+        missing && text(`${missing} ${missing === 1 ? 'bottle has' : 'bottles have'} no amount.`, `${missing} ${missing === 1 ? 'biberón' : 'biberones'} sin cantidad.`),
+      ].filter(Boolean);
+      // The bar numbers are bare, so the title names the unit (owner review, 2026-11-19).
+      const unit = units === 'us' ? 'oz' : 'mL';
+      add('bottles', 'breakdown', text(`Bottle volumes, ${unit}`, `Biberones, ${unit}`), current + past + nurseNote,
+        [...currentBottles, ...(comparing ? priorBottles : []), ...nursing.flat()],
+        {headline, note:notes.join(' '), noteMark:count ? 'nurse' : '',
+          viz:{kind:'timeline', now:nowMinutes,
+            marks:[
+            ...currentBottles.map(entry => ({t:entry.t, ml:hasAmount(entry) ? entry.ml : null, shown:hasAmount(entry) ? volumeNumber(entry.ml) : '?'})),
+            ...nursing.map(group => group.find(entry => entry.type === 'feed')).filter(Boolean).map(entry => ({t:entry.t, nurse:true}))]}});
     }
 
-    const needsPrior = allowed('feedings') || allowed('sleep');
-    const hasHandoff = Number.isFinite(handoffAt) && handoffAt <= nowMinutes && handoffAt >= dates.earlier[0] * DAY && covered(handoffAt, nowMinutes, needsPrior);
-    const start = hasHandoff ? handoffAt : DAY_START - (nowMinutes < DAY_START ? DAY : 0);
-    if (covered(start, nowMinutes, needsPrior)) {
-      const logged = metrics.map(metric => ({metric, ...metric.measure(start, nowMinutes, true)})).filter(item => item.value > 0);
-      const evidence = evidenceFor(logged);
-      if (evidence.length) {
-        const latest = Math.max(...evidence.map(entry => entry.type === 'sleep' ? sleepEnd(entry) : entry.t));
-        const dateTime = minute => dayOf(minute) === 0 ? clock(minute) : `${clock(minute)} · ${dates.date(dayOf(minute))}`;
-        const summary = logged.map(({metric,value}) => `${metric.name} ${metric.format(value)}`).join(' · ');
-        const title = hasHandoff ? text(`Since the handoff at ${dateTime(start)}`, `Desde el relevo a las ${dateTime(start)}`)
-          : text(`Since ${dateTime(start)}`, `Desde las ${dateTime(start)}`);
-        add('handoff', 'handoff', title, text(`Logged: ${summary}. Latest activity at ${dateTime(latest)}.`,
-          `Registro: ${summary}. Última actividad a las ${dateTime(latest)}.`), evidence);
+    function nightCard() {
+      // "Last night" is the night that ended at 7 AM today. Before 7 AM that night is still running, so there is no card (review r1, 2026-11-19).
+      if (!sleeps.length || nowMinutes < DAY_START) return;
+      const last = -1;
+      const recent = range(last - WINDOW + 1, last + 1).map(day => {
+        const start = day * DAY + DAY_START + NIGHT_START, stop = (day + 1) * DAY + DAY_START;
+        return covered(start, stop, true) ? {day, ...sleepWithin(sleeps, start, stop)} : null;
+      }).filter(night => night?.total);
+      // Card mix (owner, 2026-11-19): last night against the average per night, drawn like the by-this-time cards.
+      // The card needs last night and at least one night before it; the longest stretch stays in the full sentence.
+      if (recent.length > 1 && recent.at(-1).day === last) {
+        const totals = recent.map(night => Math.round(night.total)), tonight = totals.at(-1), mean = Math.round(average(totals));
+        const middle = minutes(median(recent.map(night => night.longest))), past = totals.slice(0, -1), n = past.length;
+        const nightsBefore = n === 1 ? text('the night before', 'la noche anterior') : text(`any of the ${n} nights before`, `cualquiera de las ${n} noches anteriores`);
+        // Same verdict rule as by-this-time: outside the range of the nights before, or about average.
+        const headline = tonight < Math.min(...past) ? text(`Less than ${nightsBefore}`, `Menos que ${nightsBefore}`)
+          : tonight > Math.max(...past) ? text(`More than ${nightsBefore}`, `Más que ${nightsBefore}`) : text('About average', 'Cerca del promedio');
+        const delta = tonight - mean, amount = minutes(Math.abs(delta)), avg = minutes(mean);
+        const note = !delta ? text(`The average is ${avg}`, `Promedio: ${avg}.`)
+          : text(`${amount} ${delta < 0 ? 'under' : 'over'} the average ${avg}`, `${amount} ${delta < 0 ? 'menos' : 'más'}. Promedio: ${avg}.`);
+        const over = recent.length === WINDOW ? text('the last 7 completed nights', 'las últimas 7 noches completas') : text(`${recent.length} completed nights`, `${recent.length} noches completas`);
+        const compared = !delta ? text(`the same as the average over ${over}`, `igual que el promedio de ${over}`)
+          : text(`${amount} ${delta < 0 ? 'under' : 'over'} the average of ${avg} over ${over}`, `${amount} ${delta < 0 ? 'menos' : 'más'} que el promedio de ${avg} en ${over}`);
+        add('sleep', 'night', text('Night sleep · 7 PM to 7 AM', 'Noche · 7 p. m. a 7 a. m.'),
+          text(`Last night, ${minutes(tonight)} logged, ${compared}. Median longest stretch ${middle}.`,
+            `Anoche, ${minutes(tonight)} en el registro, ${compared}. Mediana del tramo más largo: ${middle}.`), evidenceFor(recent),
+          {headline, note, viz:{kind:'columns', usual:mean, floor:0, usualLabel:text('average', 'promedio'),
+            letters:recent.map(night => weekdays.format(new Date(dates.date(night.day)))),
+            bars:recent.map((night, i) => ({value:totals[i], today:i === recent.length - 1}))}});
       }
     }
-
-    if (sleeps.length) {
-      const last = nowMinutes >= DAY_START ? -1 : -2;
-      function nights(first, end) {
-        return range(first, end).map(day => {
-          const start = day * DAY + DAY_START + NIGHT_START, stop = (day + 1) * DAY + DAY_START;
-          return covered(start, stop, true) ? sleepWithin(sleeps, start, stop) : null;
-        }).filter(night => night?.total);
-      }
-      const recent = nights(last - WINDOW + 1, last + 1), earlier = nights(last - 2 * WINDOW + 1, last - WINDOW + 1);
-      if (recent.length) {
-        const middle = list => minutes(median(list.map(night => night.longest)));
-        const total = list => minutes(average(list.map(night => night.total)));
-        const summary = text(`Over ${recent.length} of the last 7 completed nights, ${total(recent)} logged per night. Median longest stretch ${middle(recent)}.`,
-          `En ${recent.length} de las últimas 7 noches completas, ${total(recent)} por noche en el registro. Mediana del tramo más largo de ${middle(recent)}.`);
-        const compare = recent.length === WINDOW && earlier.length === WINDOW;
-        const past = compare ? text(` The previous week averaged ${total(earlier)} per night, with a median longest stretch of ${middle(earlier)}.`,
-          ` La semana anterior tuvo un promedio de ${total(earlier)} por noche y una mediana del tramo más largo de ${middle(earlier)}.`) : '';
-        add('sleep', 'night', text('Night sleep · 7 PM to 7 AM','Sueño nocturno · 7 p. m. a 7 a. m.'), summary + past,
-          evidenceFor(compare ? [...recent,...earlier] : recent));
-      }
-    }
-    longer.forEach(addPeriod => addPeriod());
+    nightCard();
+    aboutHer({text, add, dates, child, read, sleeps, bottles, groups, diapers, minutes, volume, shortDate, dayOf, nowMinutes});
     return cards;
+  }
+
+  // About-her facts (card mix, owner, 2026-11-19): records only, no AI. Home loads about the last 1 to 2 months of records.
+  // With every day since birth loaded the cards say "so far"; otherwise they name the first loaded day and the
+  // round-number cards (a count since birth) do not show. A tie keeps the earliest record.
+  const ROUND = [50, 100, 250, 500, 1000];
+  function aboutHer({text, add, dates, child, read, sleeps, bottles, groups, diapers, minutes, volume, shortDate, dayOf, nowMinutes}) {
+    const birth = child?.birthDate ? Math.round((Date.parse(child.birthDate) - Date.parse(dates.date(0))) / DAY_MS) : null;
+    // The loaded window is the run of loaded days that ends today; a gap starts it after the gap (review r1, 2026-11-19).
+    let loadedFrom = 0;
+    while (read(loadedFrom - 1)) loadedFrom--;
+    // One window for the title, the records and "so far" (review r2, 2026-11-19): from birth when the run reaches it, else from the
+    // first day of the run. It needs at least 7 days, so a baby under 7 days old gets no about-her card.
+    const full = birth !== null && birth >= loadedFrom, start = full ? birth : loadedFrom;
+    if (1 - start < 7) return;
+    const since = shortDate(start), inWindow = entry => dayOf(entry.t) >= start;
+    sleeps = sleeps.filter(inWindow); bottles = bottles.filter(inWindow); groups = groups.filter(group => inWindow(group[0])); diapers = diapers.filter(inWindow);
+    const best = (list, value) => list.reduce((top, entry) => value(entry) > value(top) ? entry : top, list[0]);
+    const record = (topic, window, entry, [en, es], headline) => {
+      const date = shortDate(dayOf(entry.t));
+      add(topic, window, text(en, es), text(`${en}: ${headline}, logged ${date}.`, `${es}: ${headline}, registrado el ${date}.`),
+        [entry], {headline, note:date, big:true, fun:true});
+    };
+    if (sleeps.length) {
+      const top = best(sleeps, entry => entry.dur);
+      record('sleep', 'longest', top, full ? ['Longest sleep so far', 'El sueño más largo'] : [`Longest sleep since ${since}`, `El sueño más largo desde el ${since}`], minutes(top.dur));
+    }
+    const measured = bottles.filter(entry => entry.unit === 'ml' && Number.isFinite(entry.ml) && entry.ml > 0);
+    if (measured.length) {
+      const top = best(measured, entry => entry.ml);
+      record('bottles', 'largest', top, full ? ['Largest bottle so far', 'El biberón más grande'] : [`Largest bottle since ${since}`, `El biberón más grande desde el ${since}`], volume(top.ml));
+    }
+    if (!full) return;
+    const counts = [
+      {topic:'feeds', list:groups.map(group => group[0]), title:n => text(`Feed number ${n}`, `Toma número ${n}`)},
+      {topic:'diapers', list:diapers, title:n => text(`Diaper number ${n}`, `Pañal número ${n}`)},
+    ];
+    // The note says where the count starts, not a total: more may follow the round number on the same day (review r1).
+    for (const {topic, list, title} of counts) {
+      const n = ROUND.findLast(round => round <= list.length), reached = list[n - 1];
+      if (!reached || dayOf(reached.t) !== 0 || reached.t > nowMinutes) continue;
+      add(topic, `number-${n}`, title(n), text(`${title(n)} was logged today, counting since ${since}.`, `${title(n)}: registrado hoy, contando desde el ${since}.`),
+        [reached], {headline:text('Today', 'Hoy'), note:text(`Counted since ${since}`, `Contados desde el ${since}`), big:true, fun:true});
+    }
   }
 
   return {pool, historyStart};

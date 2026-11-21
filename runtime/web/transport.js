@@ -34,10 +34,46 @@
     if (!response.ok) {
       const error = new Error(body.error || (response.status === 401 ? 'Sign in is required.' : 'The server could not complete this request.'));
       error.status = response.status;
+      // A sleep overlap names the saved sleeps it crosses, so the page can word it in the adult's language.
+      if (body.code === 'sleep_overlap' && Array.isArray(body.conflicts)) Object.assign(error, {code: body.code, conflicts: body.conflicts});
       throw error;
     }
     return body;
   }
+  // The Crying button. Each call answers {status, body} and never throws for an error reply: the cry queue
+  // (cry.js) and the screens judge the status. A network failure or a timeout rejects.
+  async function cryCall(path, options = {}) {
+    const method = options.method || 'GET';
+    const response = await fetch(path, {
+      credentials: 'same-origin', ...options, signal: AbortSignal.timeout(REQUEST_LIMIT_MS),
+      headers: {...(method === 'GET' ? {} : headers()), ...(options.headers || {})},
+    });
+    const json = (response.headers.get('content-type') || '').includes('json');
+    const body = json ? await response.json().catch(() => undefined) : undefined;
+    // A 2xx reply with no JSON or a cut-off body is a lost reply: it rejects like a network failure, so the caller tries again.
+    if (response.ok && body === undefined) throw new Error('The reply was cut off.');
+    return {status: response.status, body: body ?? null};
+  }
+  // keepalive: the no-clip reason of the method fixes leaves also when the page hides.
+  const cryJson = (path, method, payload, keepalive = false) => cryCall(path, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload), ...(keepalive ? {keepalive: true} : {})});
+  const cryPath = id => `/api/cries/${encodeURIComponent(id)}`;
+  const cries = {
+    home: () => cryCall('/api/cries?home=1'),
+    list: () => cryCall('/api/cries'),
+    passages: () => cryCall('/api/care-passages'),
+    create: body => cryJson('/api/cries', 'POST', body),
+    clip: (id, wav, capture) => cryCall(`${cryPath(id)}/clip`, {method: 'PUT', headers: {'Content-Type': 'audio/wav', 'x-cry-capture': capture}, body: wav}),
+    patch: (id, change, keepalive) => cryJson(cryPath(id), 'PATCH', change, keepalive),
+    sound: sound => cryJson('/api/cries/sound', 'PUT', {sound}),
+    deleteClip: id => cryCall(`${cryPath(id)}/clip`, {method: 'DELETE'}),
+    deleteCry: id => cryCall(cryPath(id), {method: 'DELETE'}),
+    deleteClips: () => cryCall('/api/cries/clips', {method: 'DELETE'}),
+    async clipBytes(id) {
+      const response = await fetch(`${cryPath(id)}/clip`, {credentials: 'same-origin', signal: AbortSignal.timeout(REQUEST_LIMIT_MS)});
+      if (!response.ok) throw Object.assign(new Error('The clip did not load.'), {status: response.status});
+      return new Uint8Array(await response.arrayBuffer());
+    },
+  };
   const operationId = () => crypto.randomUUID();
   const operationResult = async (body, opId) => {
     const statuses=['saved','pending','finishing','cancelled','failed'];
@@ -132,6 +168,7 @@
     get careLink() { return careLink; },
     // The server turns AI on with a key. With it off the app shows no insight card and no Chat, and sends no AI request.
     get ai() { return ai; },
+    cries,
     writes: {
       sleepAction: (id,action,confirmOther,opId,note='') => confirmed(`/api/timers/${encodeURIComponent(id)}/${action}`, 'POST', {confirmOther,note},opId),
       pausedSleep: (action,pauseId,opId,confirmOther=false) => confirmed(`/api/timers/sleep/${action}`, 'POST', {pauseId,confirmOther},opId),

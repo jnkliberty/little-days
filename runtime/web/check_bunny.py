@@ -262,6 +262,18 @@ def audit_chat_and_empty_states(browser, base):
     page.context.close()
 
 
+def audit_settings_bunny(pw, base):
+    """Failure case (owner, 2026-11-18, iPhone): the Settings bunny filled the Baby row and covered the name and Change photo.
+    Chromium shrinks an SVG with no size to 40 px, so the check also runs in WebKit, the iPhone engine."""
+    for engine in ("chromium", "webkit"):
+        other = launch_browser(pw, engine)
+        page = open_app(other, base, 390, 844, NOON)
+        page.locator('[data-act="open-settings"]').click()
+        size = page.locator('.settings-bunny').evaluate("e => [Math.round(e.getBoundingClientRect().width), Math.round(e.getBoundingClientRect().height)]")
+        check(f"Settings bunny is 48 x 48 px in {engine}: {size}", size == [48, 48])
+        other.close()
+
+
 def main():
     server, base = start_static_server()
     try:
@@ -270,6 +282,7 @@ def main():
             for audit in (audit_home_idle, audit_header_date_only, audit_header_size_and_timing, audit_tap_reaction, audit_stops_off_screen, audit_reduced_motion, audit_no_layout_shift, audit_save_reaction, audit_one_hop_per_save, audit_reduced_motion_cancels_moves, audit_chat_and_empty_states):
                 guarded(audit, browser, base)
             browser.close()
+            guarded(audit_settings_bunny, pw, base)
     finally:
         server.shutdown()
         server.server_close()

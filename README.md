@@ -98,7 +98,11 @@ Copy `caddy-root.crt` first (see [HTTPS](#https)). Use the sample only on a thro
 | Update | `git pull`, `docker compose build gateway`, `docker compose up -d` |
 | Start over | `docker compose down -v`, then delete `.env` and `data/` |
 
-`data/` holds every record and every Baby Buddy password. Keep it private.
+`data/` holds every record, every Baby Buddy password, and any cry audio clips you choose to record. Keep it private.
+
+## Crying
+
+Tap **Crying** on Home to compare feed, sleep and diaper gaps against recent days, open a care form in one tap, and log later what stopped the cry. Optional 10-second audio recording stays off until an adult turns it on in Settings. Recorded clips stay on your own computer in `data/`, stop at 400 clips, never leave the install, and can be deleted one by one or cleared together in Settings.
 
 ## Ask AI (on when you add your own key)
 
@@ -147,12 +151,23 @@ Chat shows a short medical notice. The app does not give medical advice.
 
 ## Develop
 
+To work on the code, clone the repository you are reading. Run both commands from the repository root:
+
 ```sh
-cd runtime && npm test              # server tests, Node 24 or newer
+(cd runtime && npm test)                                # server tests, Node 24 to 26
 python3 -m unittest discover -s deploy -p "test*.py"   # install and Baby Buddy script tests
 ```
 
-The app is in `runtime/` (a Node gateway in `server/`, the phone app in `web/`). `deploy/` holds the scripts that run inside Baby Buddy. `install.py` runs them in order.
+Where the code is:
+
+| Path | What it does |
+| --- | --- |
+| `runtime/server/main.ts` | Starts the Node gateway. |
+| `runtime/server/router.ts` | Maps each API route to its handler. |
+| `runtime/web/app.js` | The phone app: screens, forms and actions. |
+| `runtime/web/transport.js` | Every browser request to the gateway. |
+| `runtime/test/` | Server tests and the browser checks (`browser-checks.py`) with made-up data. |
+| `deploy/` | Scripts that run inside Baby Buddy. `install.py` runs them in order. |
 
 ## License
 

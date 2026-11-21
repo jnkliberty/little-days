@@ -134,6 +134,7 @@ export function createAI({store, records, env: given = process.env, fetch: reque
     await import('../web/insights.js');
     const development = (globalThis as any).LITTLE_DAYS_DEVELOPMENT;
     const mayReadChild = state.permissions.resources.children?.view === true;
+    // Today's daily facts only: the earlier days go to Home, not to Ask (review r1, 2026-11-19: they can push the request past its size limit).
     const dailyCards = developmentFacts.read(state);
     const sources = [...careGuidance(spanish), ...(mayReadChild ? [...development.cardsForAge(state.child.birthDate, today),...dailyCards] : []).map((card: any) => ({id: card.id, title: card.title[spanish ? 1 : 0], body: card.passage || card.body[spanish ? 1 : 0], url: card.url, date: card.sourceDate, scope: 'age-selected general guidance'}))];
     const factsById = new Map<string, any>();

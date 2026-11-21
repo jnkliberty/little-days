@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { HttpError } from './http.ts';
 import { requirePermission } from './records.ts';
+import { findConflicts, overlapDetails } from './sleep-overlap.ts';
 import type { Session } from './app.ts';
 import type { Store, Operation } from './store.ts';
 import { canonical } from './store.ts';
@@ -153,21 +154,16 @@ export function createTimers({ store, sessions, records, now = Date.now, log = l
   // Baby Buddy refuses a sleep that crosses another saved sleep, so a sleep timer that crosses one can never stop.
   // The check fails open: when the sleep list cannot be read, Baby Buddy stays the judge.
   // A 400, not a 409: the browser keeps the form open and editable for a 400.
+  // The error also lists the saved sleeps (`conflicts`), so the browser can name them in the adult's language.
   async function requireNoSleepOverlap(session: Session, start: string, end: string, fix: 'start' | 'end' = 'start') {
-    let rows: unknown;
-    try {
-      const value = await sessions.request(session.sessionId, { resource: 'sleep', method: 'GET', query: { child: childId(store), end_min: start, start_max: end, limit: 20 } });
-      rows = Array.isArray(value) ? value : object(value)?.results;
-    } catch { return; }
-    if (!Array.isArray(rows)) return;
-    const from = Date.parse(start), to = Date.parse(end);
-    const hit = rows.map(object).find(row => row && Date.parse(String(row.start)) < to && Date.parse(String(row.end)) > from);
-    if (!hit) return;
+    const conflicts = await findConflicts(request => sessions.request(session.sessionId, request), 'sleep', childId(store), start, end);
+    if (!conflicts?.length) return;
+    const hit = conflicts[0];
     const clock = (value: unknown) => new Intl.DateTimeFormat('en-US', { timeZone: getZone(), hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)));
     // Round the suggested start up to a whole minute: a typed 7:21 is before a sleep that ends at 7:21:23.
     const after = new Date(Math.ceil(Date.parse(String(hit.end)) / 60_000) * 60_000).toISOString();
     const hint = fix === 'start' ? `Change the start to ${clock(after)} or later` : 'Choose an end before that sleep starts';
-    throw new HttpError(400, `This nap overlaps the sleep saved from ${clock(hit.start)} to ${clock(hit.end)}. ${hint}, or delete that sleep.`);
+    throw new HttpError(400, `This nap overlaps the sleep saved from ${clock(hit.start)} to ${clock(hit.end)}. ${hint}, or delete that sleep.`, overlapDetails(conflicts));
   }
 
   function stopInProgress(timerId: string): boolean {
@@ -217,6 +213,9 @@ export function createTimers({ store, sessions, records, now = Date.now, log = l
     const extra: Record<string, unknown> = {};
     if (op.state === 'failed') {
       extra.error = object(op.metadata)?.error ?? 'The timer was not saved. Keep the timer open and try again.';
+      // A sleep that a saved sleep crossed during Undo keeps the names of those sleeps.
+      const overlap = object(object(op.metadata)?.overlap);
+      if (overlap) Object.assign(extra, overlap);
       if (object(op.metadata)?.action === 'auto-stop') extra.eventSaved = !!op.babyBuddyId;
     }
     return statusOf(op, extra);
@@ -807,6 +806,8 @@ export function createTimers({ store, sessions, records, now = Date.now, log = l
       result = await records.createEvent(session, { operationId: metadata.eventOperationId, event }, op.adult);
     } catch (error) {
       if (error instanceof HttpError && error.status >= 400 && error.status < 500) {
+        const current = store.getOperation(op.id);
+        if (error.details?.code === 'sleep_overlap' && current) store.updateUnresolvedOperationMetadata(op.id, {...object(current.metadata), overlap: {error: error.message, ...error.details}});
         reconcileRejectedStops(metadata.timerId);
         if (store.getOperation(op.id)?.state === 'pending') store.finishOperation(op.id, 'failed');
         return operationResult(store.getOperation(op.id)!);

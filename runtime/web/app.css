@@ -232,8 +232,10 @@ select.field{height:56px}
 .field{min-width:0}
 .note-photo{display:block;max-width:100%;max-height:220px;object-fit:contain;border:1px solid var(--ring);border-radius:24px}
 .handoff{font-size:var(--fs-s);color:var(--mute)}
-.mini-portrait{width:48px;height:48px;flex:none;border:1px solid var(--ring);border-radius:24px;overflow:hidden;background:var(--card)}
-.portrait-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;max-width:100%}
+.mini-portrait{width:48px;height:48px;flex:none;border:1px solid var(--ring);border-radius:24px;overflow:hidden;background:var(--card);object-fit:cover}
+/* Safari gives an SVG with no size the full row width (326 px at 390 px), so the Settings bunny needs its own size. */
+.settings-bunny{width:48px;height:48px}
+.portrait-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;max-width:100%;margin-bottom:24px}
 .portrait-upload{position:relative;overflow:hidden;flex:none}
 .portrait-file{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
 .portrait-name{min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-s);color:var(--mute)}
@@ -285,38 +287,75 @@ select.field{height:56px}
 /* Insight card. All facts share one grid cell (the hidden .fact-size copies), so the card keeps the height of the tallest fact. */
 /* Keep the focus outline inside the clip while a swiped fact moves. */
 .fact-stack{display:grid;overflow:hidden;padding:4px;margin:-4px}
+/* The card height does not depend on which facts are in the pool (card mix review, 2026-11-19): the fact area is at least as tall
+   as the designed tallest fact, so the card is 264 px at 390 px even with one short fact, and a fact that joins later moves nothing.
+   Under 300 px the English value (card 320 px at a 320 px phone); Spanish may still grow past it. */
+.insight .fact-stack{min-height:240px}
+/* With one fact there is no control row under the divider (57 px), so the fact area keeps that room too. */
+@container (max-width:299px){.insight .fact-stack{min-height:239px}.insight:not(:has(.fact-navigation)) .fact-stack{min-height:296px}}
 .fact-stack>*{grid-area:1/1;min-width:0}
-.fact-content,.fact-size{display:grid;grid-template-columns:40px minmax(0,1fr) auto;column-gap:12px;row-gap:4px;align-items:center;align-content:start}
+/* The spare height goes to the body row, so a short text fact sits centered between the title and the links (owner, 2026-11-19). A chart stays at the top. */
+.fact-content,.fact-size{display:grid;grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto 1fr auto;column-gap:12px;row-gap:4px;align-items:center}
+.insight .fact-look{align-self:start}
+/* A text fact starts a fixed gap under the title, so it reads with the title and starts at the same place on every fact (owner, 2026-11-19:
+   centered was "a little too centered"). 20 px plus the 4 px row gap is 24 px; under 300 px it is 16 px, so a 4-line fact keeps the card height. */
+.insight .fact-body:not(.fact-look),.fs-body[data-text]{align-self:start;margin-top:20px}
+@container (max-width:299px){.insight .fact-body:not(.fact-look),.fs-body[data-text]{margin-top:12px}}
 .insight h2,.fs-title{font-size:18px;line-height:1.2;font-weight:700;text-wrap:balance;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}
 .ask-pill,.ask-space{display:flex;align-items:center;justify-content:center;gap:4px;min-height:48px;padding:0 16px 0 8px;white-space:nowrap}
 .fact-body,.fs-body{grid-column:2/-1;line-height:1.4;text-wrap:pretty;overflow-wrap:anywhere}
-.fact-actions,.fs-link{grid-column:2/-1;min-height:48px;display:flex;align-items:center}
-.fact-actions{gap:8px}
-.fact-actions>.text-link{min-height:48px;padding:0;justify-content:flex-start}
+.fact-actions,.fs-link{grid-column:2/-1;min-height:48px;display:flex;flex-wrap:wrap;align-items:center;align-self:end;column-gap:16px}
+.fs-link>i{font-style:normal}
+/* Several facts: the arrows, dots and Pause sit at the right end of the link row, so the card has no separate control row.
+   The links then start under the icon to leave them room, and wrap to a second line before they reach the arrows. */
+.insight{position:relative}
+/* The gutter is the width of the controls plus 8 px, less the 4 px they sit outside the text edge, snapped to the 8 px grid: 160 px. check_carousel.py measures it. */
+.insight:has(.fact-navigation) :is(.fact-actions,.fs-link){grid-column:1/-1;padding-right:160px}
+/* A visible link and its hidden copy share one size rule, so the copy reserves the same rows. A long link wraps its own words before it reaches the arrows. */
+:is(.fact-actions,.fs-link)>.text-link{min-height:48px;min-width:0;padding:0;justify-content:flex-start;white-space:normal;text-align:left;line-height:1.2}
 .fact-size{visibility:hidden;pointer-events:none}
 /* A narrow card (a small phone, or 200 percent zoom) puts Ask under the title and gives every part its own row. */
 .insight{container-type:inline-size}
+/* A 320 px phone (card under 300 px): the icon, the title and the full Ask word stay on one row (owner, 2026-11-19: "Keep the full
+   Ask button at 320 px"). The gap is 8 px and the title breaks only at spaces, never inside a word or before a comma.
+   The body and the link take the full width; the controls take their own row under a line. */
 @container (max-width:299px){
-  .insight h2,.fs-title{grid-column:1/-1;grid-row:2}
-  .ask-pill,.ask-space{grid-column:1/-1;grid-row:3;justify-self:start;max-width:100%;white-space:normal;text-align:left;padding:0 12px}
+  .fact-content,.fact-size{column-gap:var(--space-label)}
+  .insight h2,.fs-title{overflow-wrap:normal}
+  .ask-pill,.ask-space{white-space:nowrap;padding:0 12px}
   .ask-pill .glyph,.ask-space::before{display:none}
-  .fact-body,.fs-body{grid-column:1/-1;grid-row:4}
-  .fact-actions,.fs-link{grid-column:1/-1;grid-row:5}
+  .fact-body,.fs-body{grid-column:1/-1}
+  .fact-actions,.fs-link{grid-column:1/-1}
+  .insight:has(.fact-navigation) :is(.fact-actions,.fs-link){padding-right:0}
+  .insight .fact-navigation{position:static;margin-top:4px;padding-top:4px;border-top:1px solid var(--hair)}
 }
-.fs-title::before,.fs-body::before,.ask-space::after{content:attr(data-text)}
+/* Under 240 px (200 percent zoom) there is no room beside Ask: the title and Ask each take their own row. */
+@container (max-width:239px){
+  .insight h2,.fs-title{grid-column:1/-1;grid-row:2;overflow-wrap:anywhere}
+  .ask-pill,.ask-space{grid-column:1/-1;grid-row:3;justify-self:start;max-width:100%;white-space:normal;text-align:left}
+  .fact-body,.fs-body{grid-row:4}
+  .fact-content,.fact-size{grid-template-rows:repeat(4,auto) 1fr}
+  .fact-actions,.fs-link{grid-row:5}
+}
+.fs-title::before,.fs-body[data-text]::before,.ask-space::after{content:attr(data-text)}
 .ask-space{border:2px solid transparent;font-weight:700}
 .ask-space::before{content:"";width:24px;height:24px;flex:none}
 .fs-icon{width:40px;height:40px}
-.fact-navigation{display:flex;align-items:center;flex-wrap:wrap;gap:0 4px;margin-top:4px;padding-top:4px;border-top:1px solid var(--hair)}
+/* The controls sit at the right end of the link row: previous arrow, pill-dot progress track, next arrow. */
+.fact-navigation{position:absolute;right:4px;bottom:16px;display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap}
 .fact-arrow{display:grid;place-items:center;width:44px;height:48px;padding:0;border:0;background:none;color:var(--mute)}
 .fact-arrow .ln{stroke:currentColor}
-.fact-pause{margin-left:auto;padding-inline:0}
-.fact-dots{flex:0 1 auto;min-width:32px;padding:0 4px}
-.fact-dots>span{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.fact-dot{width:8px;height:8px;border:2px solid var(--line);border-radius:999px;background:var(--card)}
-.fact-dot.current{width:16px;background:var(--line)}
-html[data-theme=dim] .fact-dot{border-color:var(--ink)}
-html[data-theme=dim] .fact-dot.current{background:var(--ink)}
+.fact-dots{flex:0 1 auto;min-width:64px}
+.fact-dots>span{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px}
+.fact-dot{position:relative;display:block;width:8px;height:8px;border:0;border-radius:999px;background:var(--plain-fill);overflow:hidden}
+.fact-dot.current{width:32px;background:var(--track)}
+.fact-dot.more{width:4px;height:4px;background:var(--plain-fill)}
+.fact-fill{position:absolute;inset:0;display:block;border-radius:999px;background:var(--line);transform-origin:left center;animation:fact-fill linear forwards}
+@keyframes fact-fill{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@media (prefers-reduced-motion:reduce){.fact-fill{animation:none!important;transform:scaleX(1)}}
+html[data-theme=dim] .fact-dot,html[data-theme=dim] .fact-dot.more{background:var(--plain-shape)}
+html[data-theme=dim] .fact-dot.current{background:var(--track)}
+html[data-theme=dim] .fact-fill{background:var(--ink)}
 
 /* Forms (DESIGN.md, look A): Cancel is the secondary button at the top left, Save is the one primary button at the bottom,
    and a chosen option takes the care color of its form. Lilac is for actions only. */
@@ -547,6 +586,11 @@ html[data-theme=dim] .overlay{background:var(--scrim)}
 .sheet>.feed-adjust>summary{padding-left:0;padding-right:0}
 /* look-match: timeline
    Ported from the round-3 mockup: .day, .list, .rowlink and the row, chips and totals above. Added parts carry data-r="R5": the search button, the search field and the "Show the day before" link. */
+/* Timeline filter chips: one row at 390 px (owner, 2026-11-21). Like the Crying rating chips (DESIGN.md), a pressed chip uses bold text,
+   a dark outline and its care fill with no check mark so all five chips stay on one line. Narrower phones or Spanish scroll sideways inside the bar. */
+.wrap .tl-chips{flex-wrap:nowrap;gap:4px;overflow-x:auto;max-width:100%;min-width:0;-webkit-overflow-scrolling:touch}
+.wrap .tl-chips .chip{flex:1 0 auto;min-width:44px;padding:0 8px;gap:4px;font-size:var(--fs-s);white-space:nowrap}
+.wrap .tl-chips .chip:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:-4px}
 .day{display:grid;gap:8px}
 .wrap .day>h2{display:flex;align-items:baseline;gap:8px;padding:0 16px}
 .wrap .list{padding:0 16px}
@@ -631,11 +675,99 @@ html[data-theme=dim] .nav-row .glyph .ln{stroke:var(--ink)}
 .sheet.confirm h2{font-size:18px;line-height:1.2;font-weight:700}
 .sheet.confirm .actions{display:grid;gap:8px}
 .sheet.confirm .back{justify-self:stretch;justify-content:center;min-height:56px}
+/* Home card graphs (owner, 2026-11-18 and 2026-11-19): a verdict headline, one gray note, then the drawing and its labels.
+   Gaps: headline to note 4 px, note (or headline) to drawing 12 px, drawing to its labels 4 px. Marks use the card's care color. */
+.fact-look{display:grid;gap:0;--chart-breast:var(--feed);--chart-bottle:var(--feed-dark)}
+.fact-figure{font-size:24px;line-height:1.2;font-weight:700;font-variant-numeric:tabular-nums;text-wrap:balance}
+.fact-note{margin-top:4px;color:var(--mute);font-size:var(--fs-s);line-height:1.4;text-wrap:balance}
+.note-mark{display:inline-block;width:16px;height:16px;margin-right:4px;vertical-align:-3px;fill:var(--chart-breast)}
+.fact-viz{margin-top:12px}
+.fact-viz svg{display:block;width:100%;height:auto;overflow:visible}
+/* Past days are outlined in the care color (3:1 on the card in both looks); today is solid. */
+.fact-viz .past{fill:var(--card);stroke:var(--c);stroke-width:2}
+.fact-viz .today{fill:var(--c)}
+.fact-viz .base{stroke:var(--hair);stroke-width:1}
+.fact-viz .usual{stroke:var(--mute);stroke-width:1.5;stroke-dasharray:4 3}
+.fact-viz .now-tick{stroke:var(--mute);stroke-width:1.5}
+.fact-viz .bottle{fill:var(--chart-bottle)}
+.fact-viz .bottle.hollow{fill:var(--card);stroke:var(--chart-bottle);stroke-width:1.5}
+.fact-viz .nurse{fill:var(--chart-breast)}
+/* By this time: "usual" sits left of the drawing, centered on the dashed line, which runs through the drawing's middle. */
+.viz-diff{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;row-gap:4px;align-items:center}
+.viz-usual,.viz-foot,.viz-days,.viz-hours,.viz-num{font-size:var(--fs-s);line-height:1.4;color:var(--mute)}
+.viz-usual{white-space:nowrap}
+/* "Today" is centered under today's column when it fits the column, and ends at the drawing's right edge when it does not. */
+.viz-foot{grid-column:2;display:grid;grid-template-columns:minmax(0,1fr) minmax(calc(100% / var(--n)),max-content);align-items:start}
+.viz-foot span{white-space:nowrap}
+.viz-foot .val{text-align:center}
+.viz-days{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));margin-top:4px;text-align:center}
+.viz-days span{white-space:nowrap}
+:is(.viz-days,.viz-foot) .val{color:var(--ink);font-weight:700}
+/* Bottles: each bare number sits above its bar, in page text. */
+.viz-line{position:relative}
+.viz-num{position:absolute;transform:translate(-50%,-100%);line-height:1.2;white-space:nowrap;color:var(--ink);font-variant-numeric:tabular-nums}
+.viz-num.hollow{color:var(--mute);font-weight:700}
+.viz-hours{position:relative;height:20px;margin-top:4px}
+.viz-hours span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+/* Card mix (owner approved the mockup design/2026-11-19-home-card-mix/, 2026-11-19). */
+/* A text fact stops at 4 lines (new facts are at most 140 characters; an older, longer fact is cut, and Source or Ask gives the rest). */
+.insight .fact-body:not(.fact-look),.fs-body[data-text]{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden}
+/* Title row: the icon and Ask sit at the top of the row, so a 3-line title does not push them to its middle.
+   The title stays centered in its row: a 1- or 2-line title is centered on the 48 px Ask, a 3-line title starts level with it. */
+.insight :is(.fact-content,.fact-size)>:is(.ico,.fs-icon){align-self:start;margin-top:4px}
+.insight :is(.ask-pill,.ask-space){align-self:start}
+/* A card that is only a number (tummy time, about-her facts, one growth record) shows it at 30 px. */
+.fact-figure.big{font-size:var(--fs-d)}
+.viz-line .viz-num{line-height:1.1}
+/* Night sleep: the weekday letters sit in the drawing's column, under it. */
+.viz-diff-days{grid-column:2;margin-top:0}
+/* Recorded weight or length: the first and the latest dates under the line. */
+.viz-ends{display:flex;justify-content:space-between;margin-top:4px;font-size:var(--fs-s);line-height:1.4;color:var(--mute)}
+.viz-ends .val{color:var(--ink);font-weight:700}
+.fact-viz .trend{fill:none;stroke:var(--line);stroke-width:2;stroke-linejoin:round}
+.fact-viz circle.past{fill:var(--card);stroke:var(--line);stroke-width:2}
+.fact-viz circle.today{fill:var(--line)}
+/* Last 7 days: one grid; each row is a subgrid, so the label column has one width and the bar groups share both edges.
+   Line 1: the care name (and, on the first row, the heading over the change column). Line 2: the daily average, the columns, the change. */
+.viz-week{display:grid;grid-template-columns:max-content minmax(48px,1fr);column-gap:12px;row-gap:4px;font-size:var(--fs-s);line-height:1.4}
+.viz-week.with-change{grid-template-columns:max-content minmax(48px,1fr) max-content}
+.wk-row{grid-column:1/-1;display:grid;grid-template-columns:subgrid;grid-template-rows:auto auto}
+.wk-name{grid-column:1;grid-row:1;color:var(--c-ink);font-weight:700;white-space:nowrap}
+html[data-theme=dim] .wk-name{color:var(--c)}
+.wk-head{grid-column:2/-1;grid-row:1;text-align:right;color:var(--mute);white-space:nowrap}
+.wk-avg{grid-column:1;grid-row:2;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.wk-bars{grid-column:2;grid-row:2;align-self:end}
+.wk-bars svg{display:block;width:100%;max-width:96px;height:18px;margin-bottom:2px}
+.wk-change{grid-column:3;grid-row:2;min-width:48px;text-align:right;color:var(--mute);font-variant-numeric:tabular-nums;white-space:nowrap}
+.viz-week .bar{fill:var(--c)}
+.viz-week .base{stroke:var(--hair);stroke-width:1}
+/* A drawing with no headline above it (Last 7 days) starts at the top of the body. */
+.fact-look>.fact-viz:first-child{margin-top:0}
+/* Home: the baby's photo takes the bunny's place in the header once one is saved. */
+.home-portrait{width:64px;height:64px;flex:none;border-radius:32px;object-fit:cover;border:2px solid var(--ring)}
 /* Settings: the duty change and the baby photo sit with the other settings. */
 .settings-card .portrait-tools{display:grid;gap:8px}
 .settings-card .portrait-upload{justify-content:center;white-space:normal;text-align:center}
 /* Insight card, from round 2: a long fact stops at 3 lines, and a card with one fact has no arrows, so its link sits closer to the card edge. */
 .insight:not(:has(.fact-navigation)) :is(.fact-actions,.fs-link){margin-bottom:-8px}
+
+.home-first{display:contents}
+@media (min-width:360px){
+  .scroll:has(+ .dock>.sleep-stop) .insight{
+    padding-block:8px;
+    & .fact-look{grid-column:1/-1}
+    & .fact-viz:not(:first-child){margin-top:4px}
+    & .fact-navigation{bottom:8px}
+  }
+}
+@media (min-width:360px) and (max-width:480px){
+  .scroll:has(+ .dock>.sleep-stop) .insight{
+    padding-inline:12px;
+    & .fact-stack{min-height:224px}
+    & .fact-figure:not(.big){font-size:var(--fs-h3)}
+    & .fact-viz{width:min(100%,320px)}
+  }
+}
 
 /* look-match: charts
    Ported from the mockup's Charts screen (round 2 and round 3): the tint band on each card, the legend, the readout, the plots, the numbers table.
@@ -671,3 +803,85 @@ html[data-theme=dim] .charts-page .plot .col.on{stroke:var(--ink)}
 .charts-page thead th{border-top:0;color:var(--mute);font-size:14px}
 .charts-page .growth-chips{margin-bottom:8px}
 .scroll:has(>.charts-page){padding:0}
+
+/* ---------- The Crying button. Tokens only: no new color. ---------- */
+/* Home: card C keeps the same gap above and below it, 16 px. The Home column gap is 24 px, so the group takes 8 px back. */
+.group.cry-home{gap:16px;margin-bottom:-8px}
+/* The text column of a row that has a second line (card C, the Crying rows, the Past cries rows). */
+.cry-text{display:block;flex:1;min-width:0;text-align:left}
+.cry-text>strong,.cry-text>.sub{display:block}
+
+/* The recording strip. One height in each state (96 px), so the rows under it never move. It is sized for the longest hold line
+   (plan 2026-11-20 M7): measured on 2026-11-20, the tallest state needs 94 px at 390 px and 133 px at 320 px in Spanish. */
+.wrap .cry-rec{position:relative;display:grid;grid-template-columns:24px minmax(0,1fr) auto;column-gap:12px;align-items:center;min-height:96px;padding:8px 16px}
+/* Only the recording state has the progress line at the bottom; the other states center their text. */
+.wrap .cry-rec[data-state="rec"]{padding-bottom:24px}
+.cry-rec .mark{display:grid;place-items:center;width:24px;height:24px}
+.rec-dot,.rec-ring{display:block;width:12px;height:12px;border-radius:50%;background:var(--ink)}
+.rec-ring{background:none;border:2px solid var(--ink)}
+.cry-rec .n{font-size:var(--fs-s);color:var(--mute);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cry-rec .back{padding:0 12px}
+/* The progress line of the strip and of the count card: the same 4 px line as the Undo countdown. */
+.prog{display:block;height:4px;border-radius:2px;background:var(--track);overflow:hidden}
+.prog i{display:block;height:100%;border-radius:2px;background:var(--ink)}
+.cry-rec .prog{position:absolute;left:16px;right:16px;bottom:10px}
+/* From 361 to 389 px (a 375 px iPhone) the Spanish recording state wraps to 3 lines and needs 113 px, so each state gets 120 px
+   (review of 2026-11-20). Under 360 px the longest state (Spanish, recording with the long hold line) needs 133 px, so 136 px. */
+@media (max-width:389px){.wrap .cry-rec{min-height:120px}}
+@media (max-width:360px){.wrap .cry-rec{min-height:136px}}
+
+/* The rating line (plan 2026-11-20 M2): a label and three chips, below the comparison card. One height in each state. */
+.wrap .cry-rate{display:grid;gap:8px;padding:12px 16px 16px}
+.cry-rate .rate-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0;min-height:24px}
+.cry-rate .fl{margin:0;color:var(--ink)}
+/* The three columns are 72 : 78 : 90, from the widest bold word of each place: Inquieta or Fussing, Llorando, Screaming.
+   Equal columns leave English "Screaming" 3.5 px short at 320 px (measured 2026-11-20). Each chip keeps its width when it is chosen. */
+.cry-rate .seg3{display:grid;grid-template-columns:minmax(0,72fr) minmax(0,78fr) minmax(0,90fr);gap:8px}
+/* These chips have no check mark (the DESIGN.md exception of 2026-11-20): with it, "Screaming" overflows its chip at 390 px and each
+   chosen chip at 320 px. A choice keeps three cues without it: the dark border, the bold text and the filled ground. */
+.wrap .cry-rate .chip{min-width:0;padding:0 8px;white-space:nowrap}
+/* 15 minutes after the tap the chips take no tap. A chip that was not chosen keeps only a hairline, so it no longer looks like a
+   button; the chosen one keeps its look. "Closed" says it in words. */
+.wrap .cry-rate .chip:disabled{color:var(--mute);border-color:var(--hair);cursor:default}
+.wrap .cry-rate .chip[aria-pressed="true"]:disabled{color:var(--ink);border-color:var(--c-ink,var(--ink))}
+/* Under 360 px the row is 256 px. "Screaming" in bold is 82 px at 16 px text and 72 px at 14 px (Helvetica Neue, measured
+   2026-11-20), so there the chips take 14 px text and 4 px side padding. */
+@media (max-width:360px){.wrap .cry-rate .chip{font-size:var(--fs-s);padding:0 4px}}
+
+/* The comparison card: the icon nav rows of "Log something else", with a second line and a bar. */
+.wrap .cry-compare{padding:16px 16px 0}
+.cry-none{font-weight:700;margin-bottom:8px}
+.cry-row .gap-note{display:flex;flex-wrap:wrap;justify-content:space-between;gap:0 8px}
+.cry-row.cry-over .v{color:var(--ink);font-weight:700}
+/* The bar is the time since the last record. The dashed line is the usual, at 60 percent of the width in each row. */
+.gap-bar{position:relative;display:block;height:16px;margin-top:4px}
+.gap-bar i{position:absolute;left:0;top:4px;height:8px;min-width:8px;border-radius:4px;background:var(--c)}
+.gap-bar b{position:absolute;left:60%;top:0;bottom:0;width:0;margin-left:-1px;border-left:2px dashed var(--median);background:var(--card);box-shadow:-2px 0 0 var(--card),2px 0 0 var(--card)}
+.cry-key{display:flex;align-items:center;gap:8px;min-height:48px;border-top:1px solid var(--hair)}
+.key-tick{flex:none;height:16px;border-left:2px dashed var(--median)}
+
+/* A passage that opens in place, and a Past cries row that opens in place. */
+.nav details>summary{list-style:none;cursor:pointer}
+.nav details>summary::-webkit-details-marker{display:none}
+.nav details[open]>summary .chev .glyph{rotate:90deg}
+.nav li+li>details>summary{border-top:1px solid var(--hair)}
+.cry-passage,.cry-body{display:grid;gap:8px;padding-bottom:16px}
+.cry-passage .textlink{justify-self:start}
+.cry-body{gap:16px}
+.cry-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.cry-tools .textlink{margin-left:auto}
+.nav-row.todo .a{color:var(--ink);font-weight:700}
+
+/* The question card on Home. */
+.cry-ask{display:grid;gap:8px}
+.wrap .cry-ask>h2{margin-bottom:0;text-wrap:balance}
+/* Skip is a short word: its tap area is 48 px wide or more. */
+.cry-ask>.textlink{justify-self:start;justify-content:flex-start;min-width:48px}
+
+/* The count card of Past cries. */
+.cry-count{display:grid;gap:4px}
+.wrap .cry-count>h2{font-size:var(--fs-h2);margin-bottom:0}
+.cry-count .prog{margin:8px 0}
+
+/* A retry button in an empty state sits under the sentence, centered. */
+.empty-state>.back{justify-self:center}

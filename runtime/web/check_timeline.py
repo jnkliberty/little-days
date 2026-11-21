@@ -81,6 +81,17 @@ def audit_chips(browser, base):
     chips = page.evaluate("[...document.querySelectorAll('.chips .chip')].map(c => [c.dataset.arg, c.textContent.trim(), c.getAttribute('aria-pressed')])")
     check(f"chips are All, Feed, Sleep, Diaper, Other, with All pressed and no filter list: {chips}",
           [c[1] for c in chips] == ["All", "Feed", "Sleep", "Diaper", "Other"] and chips[0][2] == "true" and page.locator("select[data-fid=filter]").count() == 0)
+    row_fit = page.evaluate("""() => {
+        const bar = document.querySelector('.tl-chips'), items = [...bar.querySelectorAll('.chip')].map(c => {
+            const b = c.getBoundingClientRect();
+            return {arg: c.dataset.arg, top: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height), clipped: c.scrollWidth > c.clientWidth + 1};
+        });
+        return {items, oneRow: new Set(items.map(i => i.top)).size === 1, fitsBar: bar.scrollWidth <= bar.clientWidth + 1,
+                sideways: document.documentElement.scrollWidth > innerWidth};
+    }""")
+    check(f"all five Timeline filter chips sit on one 390 px row with 44x48+ targets and no scroll: {row_fit}",
+          row_fit["oneRow"] and row_fit["fitsBar"] and not row_fit["sideways"]
+          and all(i["w"] >= 44 and i["h"] >= 48 and not i["clipped"] for i in row_fit["items"]))
     want = {"feed": {"c-feed", "c-bottle", "c-pump"}, "sleep": {"c-sleep"}, "diaper": {"c-dia"}, "other": {"c-med", "c-temp", "c-growth", "c-note", "c-tummy"}}
     for chip, ids in want.items():
         page.locator(f'[data-act="filter"][data-arg="{chip}"]').click()
@@ -208,7 +219,8 @@ def audit_night_and_spanish(browser, base):
             const cs = getComputedStyle(el); if (!el.textContent.trim()) continue;
             out.push({name: el.className || el.tagName, fg: parse(cs.color), bg: ground(el), clipped: el.scrollWidth > el.clientWidth + 1 && cs.display !== 'inline'});
         }
-        return {out, sideways: document.documentElement.scrollWidth > innerWidth, outside: [...document.querySelectorAll('.day, .chips')].some(e => box(e).right > innerWidth + 0.5)};
+        return {out, oneRow: new Set([...document.querySelectorAll('.tl-chips .chip')].map(c => Math.round(c.getBoundingClientRect().top))).size === 1,
+                sideways: document.documentElement.scrollWidth > innerWidth, outside: [...document.querySelectorAll('.day, .chips')].some(e => box(e).right > innerWidth + 0.5)};
     }"""
     for lang, night in (("es", False), ("en", False), ("en", True), ("es", True)):
         for width in (390, 320):
@@ -216,8 +228,8 @@ def audit_night_and_spanish(browser, base):
             page.locator('[data-act="search-toggle"]').click()
             m = page.evaluate(probe)
             low = sorted({(o["name"], round(ratio(o["fg"], o["bg"]), 2)) for o in m["out"] if ratio(o["fg"], o["bg"]) < 4.5})
-            check(f"{lang} {'night' if night else 'day'} {width}px: every Timeline text reads at 4.5:1 or more, nothing clips or scrolls sideways: {low}",
-                  not low and not any(o["clipped"] for o in m["out"]) and not m["sideways"] and not m["outside"])
+            check(f"{lang} {'night' if night else 'day'} {width}px: every Timeline text reads at 4.5:1 or more, chips stay one row, nothing clips or scrolls sideways: {low}",
+                  not low and m["oneRow"] and not any(o["clipped"] for o in m["out"]) and not m["sideways"] and not m["outside"])
             if width == 390:
                 page.locator('[data-act="search-toggle"]').click()
                 page.get_by_role("button", name=re.compile("Show the day before|Ver el día anterior")).click()

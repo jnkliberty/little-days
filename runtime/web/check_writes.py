@@ -843,6 +843,8 @@ def log_fixture(browser, base, state, kind="feed", start="2026-11-08T03:55:10.00
             return route.fulfill(json={"available": True})
         if req.url.endswith("/api/growth"):
             return route.fulfill(json={"entries": [], "unavailable": []})
+        if "/api/cries?home=1" in req.url or req.url.endswith("/api/care-passages"):  # the Crying card reads these at sign-in; they are not writes
+            return route.fulfill(json={"ask": None, "sound": "off"} if "/api/cries" in req.url else {"en": [], "es": []})
         sent.append({"method": req.method, "url": req.url, **req.post_data_json})
         if mode["lost"]:
             return route.abort()

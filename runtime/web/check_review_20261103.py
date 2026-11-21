@@ -99,7 +99,7 @@ def audit_left_right_colours(browser, base, at):
         page = open_app(browser, base, 390, 844, at, theme="off")
         page.st["preferences"]["palette"] = palette
         page.reload()
-        page.locator(".nav").wait_for()
+        page.locator("nav.nav").wait_for()
         writes = []
         def preferences(route):
             body = route.request.post_data_json
@@ -144,7 +144,7 @@ def audit_default_language(browser, base, at):
 
 def audit_order_and_headings(browser, base, at):
     page = open_app(browser, base, 390, 844, at, theme="off")
-    order = page.evaluate("""() => { const q=s=>document.querySelector(s).getBoundingClientRect().top; return {tiles:q('.tile'), status:q('.status'), nav:q('.nav'), dev:document.querySelector('.development')?q('.development'):null}}""")
+    order = page.evaluate("""() => { const q=s=>document.querySelector(s).getBoundingClientRect().top; return {tiles:q('.tile'), status:q('.status'), nav:q('nav.nav'), dev:document.querySelector('.development')?q('.development'):null}}""")
     check("log cards, the insight card and navigation come before development cards (duty tools and the portrait moved into Settings, R3)", order["tiles"] < order["status"] < order["nav"] and (order["dev"] is None or order["nav"] < order["dev"]))
 
     def levels():
@@ -432,7 +432,7 @@ def audit_storage_and_focus(browser, base, noon):
     on = page.evaluate("document.documentElement.dataset.theme")
     group.get_by_role("button", name="Off").click()
     off = page.evaluate("document.documentElement.dataset.theme")
-    check("with browser storage blocked, On and Off still switch the theme for the page", on == "dim" and off == "light" and page.locator('[data-arg="off"]').get_attribute("aria-pressed") == "true")
+    check("with browser storage blocked, On and Off still switch the theme for the page", on == "dim" and off == "light" and page.locator('[data-act="theme"][data-arg="off"]').get_attribute("aria-pressed") == "true")
     page.context.close()
     page = open_app(browser, base, 390, 844, noon, theme="off")
     page.locator('[data-act="open-more"]').click()

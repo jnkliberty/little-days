@@ -82,7 +82,8 @@ def development_batch(day):
              ("talk-back", ["Talk back when your baby makes sounds", "Responda cuando su bebé haga sonidos"], "Language")]
     return {"date": day, "status": "ready", "cards": [
         {"id": f"{name}-{day}", "date": day, "topic": [topic, topic], "title": title,
-         "body": ["Synthetic guidance for this check.", "Guía sintética para esta prueba."],
+         # Each card has its own body: Home shows a repeated body once (card mix, 2026-11-19).
+         "body": [f"Synthetic guidance for this check: {title[0]}.", f"Guía sintética para esta prueba: {title[1]}."],
          "source": ["Sample source", "Fuente de muestra"], "sourceDate": "Retrieved " + day,
          "url": "https://example.com/guidance"} for name, title, topic in cards]}
 

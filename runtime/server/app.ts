@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { HttpError, clientAddress, cookie, json, jsonBody, logServerError, passcodeLimits, staticFile } from './http.ts';
+import { HttpError, clientAddress, errorBody, cookie, json, jsonBody, logServerError, passcodeLimits, staticFile } from './http.ts';
 import type { createSessionService } from './session.ts';
 import { getZone } from './zone.ts';
 
@@ -102,7 +102,7 @@ export function createApp(opts: Options) {
       if (res.headersSent) return res.destroy();
       const status = error instanceof HttpError ? error.status : 502;
       if (status >= 500) logServerError(req, status, error);
-      json(res, status, {error: error instanceof HttpError ? error.message : 'The service could not complete this request. Try again.'});
+      json(res, status, errorBody(error));
     }
   });
 }

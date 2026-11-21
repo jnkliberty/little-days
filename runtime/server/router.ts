@@ -8,10 +8,13 @@ import type { createPhotos } from './photos.ts';
 import type { createHousehold } from './household.ts';
 import type { createCare } from './care.ts';
 import type { createAI } from './ai.ts';
+import { createCries } from './cries.ts';
 
-type Services = {store: Store; records: ReturnType<typeof createRecords>; timers: ReturnType<typeof createTimers>; photos: ReturnType<typeof createPhotos>; household: ReturnType<typeof createHousehold>; care: ReturnType<typeof createCare>; ai?: ReturnType<typeof createAI>};
+type Services = {store: Store; records: ReturnType<typeof createRecords>; timers: ReturnType<typeof createTimers>; photos: ReturnType<typeof createPhotos>; household: ReturnType<typeof createHousehold>; care: ReturnType<typeof createCare>; ai?: ReturnType<typeof createAI>; cries?: ReturnType<typeof createCries>};
 
-export function createRouter({store, records, timers, photos, household, care, ai}: Services) {
+export function createRouter({store, records, timers, photos, household, care, ai, cries}: Services) {
+  // Built on first use, so a test that builds a router with no store still works.
+  let cryRoutes = cries;
   async function state(session: Session, url?: URL) {
     const from = url?.searchParams.get('from'), to = url?.searchParams.get('to');
     const base = await household.state(session, from && to ? {from, to} : undefined);
@@ -40,6 +43,7 @@ export function createRouter({store, records, timers, photos, household, care, a
   }
   const handle: DomainHandler = async (req, res, url, session) => {
     const path = url.pathname, method = req.method;
+    if (path === '/api/care-passages' || path === '/api/cries' || path.startsWith('/api/cries/')) return (cryRoutes ??= createCries({store})).handle(req, res, url, session);
     if (path === '/api/development' && method === 'POST') {
       const input = await jsonBody(req);
       if (Object.keys(input).length) throw new HttpError(400,'No development input is needed.');

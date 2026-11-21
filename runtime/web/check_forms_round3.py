@@ -214,12 +214,14 @@ def timer_unit_form(browser, base):
 
 
 def pager_dot_color(browser, base):
-    """Fails if the Home pager dots use the page ink instead of the mockup's deep violet (--line, rgb 63 54 89)."""
-    page = open_app(browser, base, 390, 844, NOON, theme="off")
+    """Fails if the Home pager progress fill does not use deep violet (--line, rgb 63 54 89) inside the track pill."""
+    # The daily facts give Home more than one card, so the pager shows (the Since 7:00 AM card is gone, 2026-11-19).
+    page = open_app(browser, base, 390, 844, NOON, theme="off", development=True)
+    page.wait_for_function("S.developmentBatch")
     page.set_default_timeout(4000)
     page.evaluate("() => {S.tab='home';S.sheet=null;render();}")
-    colors = page.evaluate("() => [...document.querySelectorAll('.fact-dot')].map(e => [getComputedStyle(e).borderColor, e.classList.contains('current') ? getComputedStyle(e).backgroundColor : ''])")
-    check("the long dot and the ring dots of the insight pager are deep violet", len(colors) >= 2 and all(c[0] == "rgb(63, 54, 89)" for c in colors) and [c[1] for c in colors if c[1]] == ["rgb(63, 54, 89)"])
+    colors = page.evaluate("() => ({track: getComputedStyle(document.querySelector('.fact-dot.current')).backgroundColor, fill: getComputedStyle(document.querySelector('.fact-dot.current .fact-fill')).backgroundColor})")
+    check("the insight pager progress fill is deep violet inside the track pill", colors["fill"] == "rgb(63, 54, 89)" and colors["track"] == "rgb(228, 228, 232)")
     page.context.close()
 
 

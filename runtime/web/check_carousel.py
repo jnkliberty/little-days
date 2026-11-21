@@ -23,6 +23,10 @@ def check(name, value):
 def fact(page):
     return page.locator('.insight').get_attribute('data-fact')
 
+def turn_ms(page):
+    """The auto-turn time of the shown card: 12 s for a graph card, 7 s for a text card (owner, 2026-11-19)."""
+    return 12000 if page.locator('.insight .fact-content .fact-viz').count() else 7000
+
 def drag(page, start, end, touch=False):
     """One drag with the mouse, or one touch (a finger) through the browser's own input: pointer events are the same either way."""
     (x0, y0), (x1, y1) = start, end
@@ -106,7 +110,7 @@ def audit_swipe(page):
     page.evaluate('()=>{factPaused=false}')
     drag(page, (x + 40, y), (x - 40, y))
     check('swipe left shows the next fact, the one the Next arrow shows', fact(page) != start and fact(page) == via_arrow)
-    check('a swipe is a manual move: it pauses the rotation as an arrow tap does', page.evaluate('factPaused') is True)
+    check('a swipe restarts rotation instead of permanently pausing it', page.evaluate('factPaused') is False and page.evaluate('factMoved') is True)
     x, y = body_point(page)
     drag(page, (x - 40, y), (x + 40, y))
     check('swipe right shows the previous fact', fact(page) == start)
@@ -152,12 +156,10 @@ def audit_household_clock(browser, base):
     page = open_app(browser, base, 390, 844, evening, ai=False)
     try:
         page.st['entries'] = [{'id': f'feed-{hour}', 'type': 'feed', 'side': 'L', 't': hour * 60} for hour in (11, 15, 21)]
-        for hour, title, count in [(12, '12:00', 2), (20, '8:00', 1)]:
-            page.st['dutyNoteAt'] = evening.replace(hour=hour).isoformat()
-            page.evaluate('pollFamily()')
-            handoff = page.evaluate('factPool().find(f=>f.topic==="handoff")')
-            check(f'a {hour}:00 household handoff starts at the correct clock time and counts {count} feeds',
-                  title in handoff['title'] and 'PM' in handoff['title'] and f'Feeds {count}.' in handoff['body'])
+        page.st['dutyNoteAt'] = evening.replace(hour=12).isoformat()
+        page.evaluate('pollFamily()')
+        check('a saved duty handoff does not add a Since the handoff insight card',
+              page.evaluate('!factPool().some(f=>f.topic==="handoff")'))
     finally:
         page.context.close()
 
@@ -222,32 +224,36 @@ def audit_history(browser, base, lang):
         check('Home requests older history directly, in chunks of 31 or fewer days', any(lo <= -14 for lo, _ in reads) and all(0 < hi - lo <= 31 for lo, hi in reads))
         check('Home history leaves shared records and preferences unchanged',
               page.evaluate('unitsOf()==="metric"&&!S.entries.some(e=>e.id==="feed-8")'))
-        check('the handoff summary uses the latest saved handoff time',
-              page.evaluate('factPool().some(f=>f.topic==="handoff"&&f.title.includes("9:30")&&f.body.includes("10:00"))'))
+        check('a saved handoff note does not add a Since the handoff insight card',
+              page.evaluate('!factPool().some(f=>f.topic==="handoff")'))
         page.evaluate('factPaused=true; S.factId=factPool()[0].id; render()')
         ids = []
-        for _ in range(page.locator('.fact-dot').count()):
+        for _ in range(page.evaluate('S.renderedFacts.length')):
             ids.append(fact(page))
             page.locator('[data-act=fact-next]').click()
-        check('the first two cards include personal and AI facts', not ids[0].startswith('source:') and ids[1].startswith('source:'))
+        check('the first two cards are an AI fact, then a personal fact', ids[0].startswith('source:') and not ids[1].startswith('source:'))
         check('both AI cards appear once in a full cycle with more personal cards', len(ids) == len(set(ids)) and sum(i.startswith('source:') for i in ids) == 2 and len(ids) > 4)
         check('the current card wraps to the first card', fact(page) == ids[0])
-        page.wait_for_function('factPool().some(f => f.id.startsWith("growth:weight-for-length:"))')
-        page.evaluate('S.factId=factPool().find(f=>f.id.startsWith("growth:weight-for-length:")).id; render()')
-        check('the WHO comparison links to both the log and the published table',
-              page.locator('.insight [data-act=fact-log]').count() == 1 and 'who.int' in page.locator('.insight a').get_attribute('href'))
-        band = '15th to 50th percentile' if lang == 'en' else 'percentiles 15 a 50'
-        check('the WHO comparison displays the expected band and full reference group in the current language',
-              band in page.locator('.fact-body').inner_text()
-              and page.locator('.fact-body').evaluate('e=>e.scrollHeight<=e.clientHeight'))
-        page.screenshot(path=str(OUT/f'who-390-{lang}.png'), animations='disabled')
-        volume = page.evaluate('factPool().find(f => f.body.includes("60") && f.body.includes("mL")).id')
+        page.wait_for_function('factPool().some(f => f.id.startsWith("growth:weight:"))')
+        check('no WHO weight-for-length card appears while WHO tables are omitted',
+              page.evaluate('!factPool().some(f => f.id.startsWith("growth:weight-for-length:"))'))
+        page.evaluate('S.factId=factPool().find(f=>f.id.startsWith("growth:weight:")).id; render()')
+        check('the recorded weight card shows the measurement and links to its record',
+              page.locator('.insight [data-act=fact-log]').count() >= 1
+              and '5.45 kg' in page.locator('.insight .fact-content').inner_text().replace('\xa0', ' '))
+        # The bottle graph card (the about-her "Largest bottle" card also names 60 mL).
+        volume = page.evaluate('factPool().find(f => f.id.startsWith("trend:bottles:breakdown:")).id')
         page.evaluate('(id) => {S.factId=id; render()}', volume)
         check('a personal fact links to its records', page.locator('.insight [data-act=fact-log]').count() >= 1)
+        # A bottle graph shows bare numbers over its bars and names the unit in its title (owner, 2026-11-19).
+        numbers = '[...document.querySelectorAll(".insight .fact-content .viz-num")].map(n => n.textContent)'
+        before = page.evaluate(numbers)
         page.st['preferences']['units'] = 'us'
         page.evaluate('pollFamily()')
-        page.wait_for_function('document.querySelector(".fact-body").textContent.includes("oz")')
-        check('sync converts the units and preserves the active fact', fact(page) == volume)
+        page.wait_for_function('document.querySelector(".insight .fact-content h2").textContent.endsWith(", oz")')
+        after = page.evaluate(numbers)
+        check(f'sync converts the bar number from 60 to 2 and preserves the active fact ({before} to {after})',
+              '60' in before and '2' in after and '60' not in after and fact(page) == volume)
         if lang == 'en':
             x, y = body_point(page)
             page.mouse.move(x, y)
@@ -257,7 +263,7 @@ def audit_history(browser, base, lang):
             page.evaluate('pollFamily()')
             page.wait_for_function('unitsOf()==="metric"')
             check('sync leaves the current card in place during a drag',
-                  fact(page) == volume and page.evaluate('factSwipe.content.isConnected') and 'oz' in page.locator('.fact-body').inner_text())
+                  fact(page) == volume and page.evaluate('factSwipe.content.isConnected') and 'oz' in page.evaluate('(document.querySelector(".insight .fact-content").textContent+(document.querySelector(".insight .fact-content svg[role=img]")?.getAttribute("aria-label")||""))'))
             page.mouse.move(x - 80, y, steps=4)
             page.mouse.up()
             check('the swipe completes normally after sync', fact(page) != volume)
@@ -266,7 +272,8 @@ def audit_history(browser, base, lang):
                 check('personal trends are available with AI switched off',
                       second.evaluate('factPool().some(f=>f.id.startsWith("trend:"))') and second.locator('.insight [data-act=ask-ai]').count() == 0)
                 second.route(re.compile(r'/api/events/feed-8$'), lambda r: update_backdated(r, history))
-                weekly = 'factPool().some(f=>f.id.startsWith("trend:feeds:week:"))'
+                # The feeds row of the Last 7 days card compares with the week before only when both weeks are complete (card mix, 2026-11-19).
+                weekly = 'factPool().some(f=>f.id.startsWith("trend:week:seven:")&&f.viz.rows.some(r=>r.tone==="c-feed"&&r.change))'
                 page.wait_for_function(weekly)
                 second.evaluate('(time)=>LittleDaysAPI.writes.updateEntry("feed-8",{type:"bottle",time,ml:60})',
                                 (AT - timedelta(days=9, hours=2)).isoformat())
@@ -290,6 +297,85 @@ def audit_history(browser, base, lang):
         page.context.close()
 
 
+CONTROLS_JS = """() => {
+  const facts = S.renderedFacts, i = facts.findIndex(f => f.id === S.factId), n = facts.length, first = Math.max(0, Math.min(i - 1, n - 3));
+  const dots = [...document.querySelectorAll('.fact-dot')];
+  const want = dots.length === Math.min(3, n) && dots.every((d, k) => d.classList.contains('current') === (first + k === i)
+    && d.classList.contains('more') === (first + k !== i && ((k === 0 && first > 0) || (k === dots.length - 1 && first + k < n - 1))));
+  const label = document.querySelector('.fact-dots').getAttribute('aria-label') === t('factPosition', i + 1, n);
+  const nav = document.querySelector('.fact-navigation').getBoundingClientRect();
+  const clear = [...document.querySelectorAll('.fact-content:not([data-fact-outgoing]) .fact-actions>*')]
+    .every(e => { const r = e.getBoundingClientRect(); return r.right <= nav.left || r.bottom <= nav.top || r.top >= nav.bottom; });
+  const stack = document.querySelector('.fact-stack').getBoundingClientRect(), content = document.querySelector('.fact-content:not([data-fact-outgoing])');
+  const fits = [...content.children].every(e => e.getBoundingClientRect().bottom <= stack.bottom + 0.5);
+  return {i, want, label, clear, fits};
+}"""
+
+def audit_controls(browser, base):
+    """Failure cases the single screenshot misses: a wrong dot window at either end, a wrong position label,
+    a link under the arrows on a narrow phone or in Spanish, with Pause shown or hidden, and a fact clipped by the card."""
+    for width, lang, motion in [(364,'es','no-preference'),(364,'en','reduce'),(390,'es','reduce'),(390,'en','no-preference')]:
+        page = open_app(browser, base, width, 844, AT, lang=lang, development=True)
+        page.clock.install(time=AT)
+        page.clock.pause_at(AT + timedelta(seconds=1))
+        page.reload()
+        page.emulate_media(reduced_motion=motion)
+        page.locator('.insight').wait_for()
+        page.evaluate('()=>{factPaused=true;S.factId=S.renderedFacts[0].id;render()}')
+        n = page.evaluate('S.renderedFacts.length')
+        results = []
+        for _ in range(n):
+            results.append(page.evaluate(CONTROLS_JS))
+            page.locator('[data-act=fact-next]').click()
+        tag = f'{width}px {lang} motion={motion}'
+        check(f'dot window and active dot are right at every position, {tag}', n > 3 and all(r['want'] for r in results))
+        check(f'position label names the fact and the total, {tag}', all(r['label'] for r in results))
+        check(f'no link sits under the controls, {tag}', all(r['clear'] for r in results))
+        check(f'every fact fits the card, {tag}', all(r['fits'] for r in results))
+        page.context.close()
+
+def audit_review_r1(browser, base):
+    """Review round 1 (2026-11-19). Failure cases: (3) a text card that becomes a graph card under the same id still turns at 7 s;
+    (5) an auto-turn counts as someone moving the card, so the daily facts that arrive late no longer open Home on a fun card."""
+    page = open_app(browser, base, 390, 844, AT)
+    page.clock.install(time=AT)
+    page.reload()
+    page.locator('.insight').wait_for()
+    page.emulate_media(reduced_motion='no-preference')
+    page.mouse.move(0, 0)
+    page.evaluate('''()=>{ window.__viz = false; const base = {kind:'record', topic:'none', evidence:[]};
+      factPool = () => [{...base, id:'r1:a', title:'A', body:'A text card.', ...(window.__viz ? {headline:'1 h', viz:{kind:'columns', bars:[{label:'Today', value:1, today:true}]}} : {})},
+                        {...base, id:'r1:b', title:'B', body:'Another card.'}];
+      factPaused = false; S.factId = 'r1:a'; render(); }''')
+    page.clock.run_for(6000)
+    page.evaluate('()=>{ window.__viz = true; render(); }')
+    check('r1 the card became a graph card under the same id', page.locator('.insight .fact-content .fact-viz').count() == 1)
+    page.clock.run_for(1500)
+    check('r1 a card that becomes a graph card does not turn at 7 s', fact(page) == 'r1:a')
+    page.clock.run_for(10200)  # 6 s + 12 s = 18 s; now at 17.7 s
+    check('r1 not before 12 s after it became a graph card', fact(page) == 'r1:a')
+    page.clock.run_for(500)
+    check('r1 it turns 12 s after it became a graph card', fact(page) == 'r1:b')
+    page.context.close()
+
+    page = open_app(browser, base, 390, 844, AT)
+    held = []
+    page.route('**/api/development', lambda route: held.append(route))
+    page.clock.install(time=AT)
+    page.reload()
+    page.locator('.insight').wait_for()
+    page.wait_for_function('S.developmentAttempt')
+    page.emulate_media(reduced_motion='no-preference')
+    page.mouse.move(0, 0)
+    first = fact(page)
+    page.clock.run_for(12500)
+    check(f'r1 Home turned on its own while the daily facts were late ({first} to {fact(page)})', fact(page) != first)
+    from check_support import development_batch, MX
+    held.pop().fulfill(json=development_batch(AT.astimezone(MX).date().isoformat()))
+    page.wait_for_function('S.developmentBatch')
+    check('r1 an auto-turn is not a person moving the card: late daily facts still open Home on a fun card', fact(page).startswith('source:'))
+    page.context.close()
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     server, base = start_static_server()
@@ -303,6 +389,8 @@ def main():
                     page.clock.pause_at(AT + timedelta(seconds=1))
                     page.reload()
                     page.locator('.insight').wait_for()
+                    # The daily facts arrive after the first render and Home then opens on the first fun card.
+                    page.wait_for_function('S.developmentBatch && document.querySelector(".insight").dataset.fact.startsWith("source:")')
                     first = fact(page)
                     page.clock.run_for(6999)
                     check('fact remains for seven seconds', fact(page) == first)
@@ -310,14 +398,20 @@ def main():
                     second = fact(page)
                     page.screenshot(path=str(OUT/f'playing-{width}-{lang}.png'), animations='disabled')
                     check('timer advances to another fact', second != first)
-                    check('daily records alternate with age-based guidance', not first.startswith('source:') and second.startswith('source:'))
+                    check('Home opens on a daily fact, then a record fact follows', first.startswith('source:') and not second.startswith('source:'))
+                    check('no Pause button is shown; active dot carries a running progress fill',
+                          page.locator('[data-act=fact-pause]').count() == 0
+                          and page.locator('.fact-dot.current .fact-fill').count() == 1
+                          and page.locator('.fact-dot.current .fact-fill').evaluate('(el)=>getComputedStyle(el).animationPlayState') == 'running')
                     check('one active position dot', page.locator('.fact-dot.current').count() == 1)
+                    check('at most 3 position dots for more than 3 facts', page.evaluate('S.renderedFacts.length') > 3 and page.locator('.fact-dot').count() == 3)
                     check('position is named for screen readers', '{' not in page.locator('.fact-dots').get_attribute('aria-label'))
                     page.locator('.insight').hover()
                     page.clock.run_for(14000)
-                    check('hover pauses rotation', fact(page) == second)
+                    check('hover pauses rotation and progress fill',
+                          fact(page) == second and page.locator('.fact-dot.current .fact-fill').evaluate('(el)=>getComputedStyle(el).animationPlayState') == 'paused')
                     page.mouse.move(0,0)
-                    page.clock.run_for(7000)
+                    page.clock.run_for(turn_ms(page))
                     check('leaving hover restarts rotation', fact(page) != second)
                     before_manual = fact(page)
                     page.locator('[data-act=fact-next]').click()
@@ -326,16 +420,13 @@ def main():
                     check('Previous returns to the fact before Next', fact(page) == before_manual and next_fact != before_manual)
                     page.mouse.move(0,0)
                     page.locator('[data-act=fact-previous]').evaluate('(el)=>el.blur()')
-                    page.clock.run_for(14000)
-                    check('manual navigation stays paused', fact(page) == before_manual)
-                    page.locator('[data-act=fact-pause]').click()
-                    page.mouse.move(0,0)
-                    page.locator('[data-act=fact-pause]').evaluate('(el)=>el.blur()')
-                    page.clock.run_for(7000)
-                    check('Play resumes rotation', fact(page) != before_manual)
+                    page.clock.run_for(turn_ms(page) - 100)
+                    check('manual navigation resets the timer for the chosen fact', fact(page) == before_manual)
+                    page.clock.run_for(200)
+                    check('manual navigation resumes auto-rotation after the pill fills', fact(page) != before_manual)
                     focused = fact(page)
                     page.locator('.insight [data-act=ask-ai]').focus()
-                    page.clock.run_for(7000)
+                    page.clock.run_for(14000)
                     check('keyboard focus pauses rotation', fact(page) == focused)
                     page.locator('.insight [data-act=ask-ai]').evaluate('(el)=>el.blur()')
                     page.emulate_media(reduced_motion='reduce')
@@ -349,7 +440,7 @@ def main():
                     page.locator('[data-act=fact-next]').evaluate('(el)=>el.blur()')
                     page.screenshot(path=str(OUT/f'after-{width}-{lang}.png'))
                     ids=[]
-                    for _ in range(page.locator('.fact-dot').count()):
+                    for _ in range(page.evaluate('S.renderedFacts.length')):
                         ids.append(fact(page))
                         page.locator('[data-act=fact-next]').click()
                     check('one full cycle visits every fact and wraps', len(ids)==len(set(ids)) and fact(page)==ids[0])
@@ -390,6 +481,8 @@ def main():
                         check('empty facts keep the empty state and show no navigation', fact(page)=='' and page.locator('[data-act=fact-next], .fact-dots, [data-act=fact-pause]').count()==0 and page.locator('.fact-dot').count()==0)
                     check('no browser errors', not page.errors)
                     page.context.close()
+                audit_review_r1(browser, base)
+                audit_controls(browser, base)
                 for lang in ('en', 'es'):
                     audit_history(browser, base, lang)
                 audit_household_clock(browser, base)

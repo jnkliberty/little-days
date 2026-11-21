@@ -4,7 +4,15 @@ import { extname, resolve, sep } from 'node:path';
 
 export class HttpError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  // Extra reply fields for the browser, such as the saved sleeps that a new sleep overlaps.
+  details?: Record<string, unknown>;
+  constructor(status: number, message: string, details?: Record<string, unknown>) { super(message); this.status = status; if (details) this.details = details; }
+}
+
+// The JSON body of an error reply. Only an HttpError shows its message and details; any other error stays generic.
+export function errorBody(error: unknown): Record<string, unknown> {
+  if (!(error instanceof HttpError)) return { error: 'The service could not complete this request. Try again.' };
+  return { error: error.message, ...(error.details ?? {}) };
 }
 
 export function json(res: ServerResponse, status: number, value: unknown, headers: Record<string, string> = {}) {
@@ -16,8 +24,9 @@ export function json(res: ServerResponse, status: number, value: unknown, header
 }
 
 // One stderr line for a 5xx reply: method, path without query, status, error name. Never the body, query, message, or tokens.
+// Each UUID in the path becomes :id, so no log line holds a cry id or an operation id.
 export function logServerError(req: IncomingMessage, status: number, error: unknown) {
-  const path = (req.url || '').split(/[?#]/)[0].replace(/[^\x21-\x7e]/g, '?').slice(0, 200);
+  const path = (req.url || '').split(/[?#]/)[0].replace(/[^\x21-\x7e]/g, '?').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id').slice(0, 200);
   const name = error instanceof Error ? error.name : typeof error;
   process.stderr.write(`${req.method} ${path} ${status} ${name}\n`);
 }
@@ -103,7 +112,7 @@ export async function staticFile(req: IncomingMessage, res: ServerResponse, webD
   const etag = `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
   res.writeHead(etagMatches(req.headers['if-none-match'], etag) ? 304 : 200, {
     'content-type': type.startsWith('font/') ? type : type + '; charset=utf-8', 'cache-control': type.startsWith('font/') ? 'public, max-age=31536000, immutable' : 'no-cache', etag,
-    'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow',
   });
   res.end(res.statusCode === 304 ? undefined : await readFile(file));

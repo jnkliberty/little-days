@@ -86,7 +86,8 @@ test('a manual sleep overlapping a saved sleep explains the refusal and preserve
   try {
     const reply = await f.call('POST', '/api/events', { operationId, event: { type: 'sleep', nap: true, ...splitBefore } });
     assert.equal(reply.code, 400);
-    assert.equal(reply.body.error, overlapMessage);
+    // The refusal names the saved sleep it crosses (sleep-overlap.test.ts holds the details).
+    assert.equal(reply.body.error, 'This time overlaps the sleep saved from 8:00 to 10:00 AM. Change the start or end, or delete that sleep in the timeline.');
     assert.equal(f.store.getOperation(operationId)?.state, 'failed');
     assert.deepEqual([...f.rows.values()], [before]);
   } finally { f.store.close(); }
@@ -227,7 +228,7 @@ test('T1 an overlapping edit returns its useful 400 message and fails the operat
   try {
     const reply = await f.call('PATCH', '/api/events/sleep:42', { operationId: id, event: { type: 'sleep', nap: true, start: '2026-10-25T14:00:00Z', end: splitBefore.end, expected: splitBefore } });
     assert.equal(reply.code, 400);
-    assert.equal(reply.body.error, overlapMessage);
+    assert.equal(reply.body.error, 'This time overlaps the sleep saved from 7:00 to 8:00 AM. Change the start or end, or delete that sleep in the timeline.');
     assert.equal(f.store.getOperation(id)?.state, 'failed');
     assert.deepEqual(f.rows.get('sleep:42'), { id: 42, child: 7, ...splitBefore, nap: true, notes: 'Fake note' });
   } finally { f.store.close(); }
