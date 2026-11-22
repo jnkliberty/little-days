@@ -448,3 +448,99 @@ test('a photo reply carries an ETag and a repeat request with If-None-Match gets
     assert.equal((await stale.arrayBuffer()).byteLength, jpeg.length);
   } finally { store.close(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });
+
+// Group G4-4: GET /api/photos list route, note permission, visit-attachment exclusion, pagination cap, no route shadowing.
+test('G4-4: GET /api/photos requires core.view_note, excludes visit attachments and non-photo notes, paginates with nextOffset, and does not shadow /api/photos/:id', async () => {
+  const store = createTestStore();
+  store.putEventMetadata({resource: 'notes', babyBuddyId: '101', adult: session.adult, metadata: {appType: 'note', title: 'First morning', photoName: 'm1.jpg'}});
+  store.putEventMetadata({resource: 'notes', babyBuddyId: '102', adult: session.adult, metadata: {appType: 'visit', provider: 'Dr. Lee', photoName: 'summary.jpg'}});
+  store.putEventMetadata({resource: 'notes', babyBuddyId: '103', adult: session.adult, metadata: {appType: 'milestone', title: 'First smile'}});
+  const queries: Record<string, unknown>[] = [];
+  const allNotes = [
+    {id: 103, child: child.id, note: 'First smile', time: '2026-11-18T14:00:00Z', image: '/media/p3.jpg'},
+    {id: 102, child: child.id, note: 'Visit summary', time: '2026-11-15T10:00:00Z', image: '/media/visit.jpg'},
+    {id: 104, child: child.id, note: 'Plain text note', time: '2026-11-12T08:00:00Z', image: null},
+    {id: 105, child: 999, note: 'Other child photo', time: '2026-11-11T08:00:00Z', image: '/media/other.jpg'},
+    {id: 101, child: child.id, note: 'First morning', time: '2026-11-07T09:00:00Z', image: '/media/p1.jpg'},
+  ];
+  const sessions = {request: async (_id: string, req: {resource: string; method: string; id?: string; query?: Record<string, unknown>}) => {
+    if (req.resource === 'notes' && req.id === '101') return allNotes[4];
+    if (req.resource === 'notes' && req.method === 'GET') {
+      queries.push(req.query || {});
+      return {count: allNotes.length, results: allNotes};
+    }
+    throw new Error(`unexpected ${req.method} ${req.resource}`);
+  }};
+  const photos = createPhotos({store, sessions: sessions as any, baseUrl: 'http://babybuddy:8000', fetchImpl: async () => imageResponse(jpeg)});
+  const router = createRouter({photos} as unknown as Parameters<typeof createRouter>[0]);
+  const server = createServer(async (req, res) => {
+    try { await router.handle(req, res, new URL(req.url!, 'http://x'), session as never); }
+    catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      res.writeHead(status, {'content-type': 'application/json'});
+      res.end(JSON.stringify({error: error instanceof Error ? error.message : 'error'}));
+    }
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const base = `http://127.0.0.1:${address.port}`;
+  try {
+    const listed = await fetch(`${base}/api/photos`);
+    assert.equal(listed.status, 200);
+    const body = await listed.json() as {photos: Array<{id: string; time: string; url: string; title: string; photoName: string}>; nextOffset: number | null};
+    assert.equal(body.nextOffset, null);
+    assert.deepEqual(body.photos.map(p => p.id), ['notes:103', 'notes:101']);
+    assert.equal(body.photos[0].url, '/api/photos/notes%3A103');
+    assert.equal(body.photos[0].title, 'First smile');
+    assert.equal(body.photos[1].title, 'First morning');
+    assert.equal(body.photos[1].photoName, 'm1.jpg');
+
+    // Individual photo route is not shadowed by GET /api/photos
+    const imgRes = await fetch(`${base}/api/photos/notes%3A101`);
+    assert.equal(imgRes.status, 200);
+    assert.deepEqual(Buffer.from(await imgRes.arrayBuffer()), jpeg);
+
+    // Invalid offset returns 400
+    assert.equal((await fetch(`${base}/api/photos?offset=-5`)).status, 400);
+    assert.equal((await fetch(`${base}/api/photos?offset=abc`)).status, 400);
+
+    // Without core.view_note permission, returns 403
+    store.putSetting('user:11', 'permissions', ['core.view_child']);
+    assert.equal((await fetch(`${base}/api/photos`)).status, 403);
+  } finally { store.close(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+});
+
+test('G4-5: GET /api/photos scans a fixed page budget per call and returns nextOffset for remaining pages', async () => {
+  const store = createTestStore();
+  let calls = 0;
+  // 650 notes total: 6 full pages of 100 + 1 final page of 50; only note 520 (on page 6) has an image.
+  const totalNotes = 650;
+  const sessions = {request: async (_id: string, req: {resource: string; method: string; query?: Record<string, unknown>}) => {
+    calls++;
+    const offset = Number(req.query?.offset || 0), limit = Number(req.query?.limit || 100);
+    const results = [];
+    for (let i = offset; i < Math.min(totalNotes, offset + limit); i++) {
+      results.push({
+        id: 1000 + i,
+        child: child.id,
+        note: `Note ${i}`,
+        time: new Date(Date.UTC(2026, 9, 1) + i * 3600_000).toISOString(),
+        image: i === 520 ? '/media/old-photo.jpg' : null,
+      });
+    }
+    return {count: totalNotes, results};
+  }};
+  const photos = createPhotos({store, sessions: sessions as any, baseUrl: 'http://babybuddy:8000', fetchImpl: async () => imageResponse(jpeg)});
+  try {
+    const first = await (photos as any).list(session, null);
+    assert.equal(calls, 5, 'first call stops at fixed 5-page budget');
+    assert.deepEqual(first.photos, []);
+    assert.equal(first.nextOffset, 500);
+
+    const second = await (photos as any).list(session, String(first.nextOffset));
+    assert.equal(calls, 7, 'second call finishes remaining 2 pages');
+    assert.equal(second.nextOffset, null);
+    assert.deepEqual(second.photos.map((p: any) => p.id), ['notes:1520']);
+  } finally { store.close(); }
+});

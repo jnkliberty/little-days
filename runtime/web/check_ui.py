@@ -769,7 +769,8 @@ def audit_look_spacing(browser, base):
             page.reload()
             page.locator('.tile[data-act="open-feed"]').wait_for()
             # The Crying card (DESIGN.md, 2026-11-20) is the one exception: 16 px above it and 16 px below it. It must be there (cryGap is null without it).
-            gaps = page.evaluate("""() => { const els = [...document.querySelector('.wrap').children], kids = els.map(e => e.getBoundingClientRect());
+            # .home-first is display:contents (no box of its own), so its children are the groups to measure.
+            gaps = page.evaluate("""() => { const els = [...document.querySelector('.wrap').children].flatMap(e => getComputedStyle(e).display === 'contents' ? [...e.children] : [e]), kids = els.map(e => e.getBoundingClientRect());
                 const tiles = [...document.querySelectorAll('.tiles .tile')].map(e => e.getBoundingClientRect()), cry = document.querySelector('.cry-home');
                 const cryGap = cry ? Math.round(cry.lastElementChild.getBoundingClientRect().top - cry.firstElementChild.getBoundingClientRect().bottom) : null;
                 return {between: kids.slice(1).map((b, i) => Math.round(b.top - kids[i].bottom)), want: kids.slice(1).map((b, i) => els[i].classList.contains('cry-home') ? 16 : 24),
@@ -892,7 +893,7 @@ def audit_empty_and_photos_look(browser, base):
             if screen == "Charts":
                 # look-match: each Charts card keeps its head and says "No records yet." in place of the one bunny card.
                 words = "No records yet." if lang == "en" else "Todavía no hay registros."
-                cards = page.evaluate("""() => [...document.querySelectorAll('.charts-page .card')].map(c => [c.querySelector('h2')?.textContent, c.querySelector('p.sub')?.textContent, c.getBoundingClientRect().right <= innerWidth])""")
+                cards = page.evaluate("""() => [...document.querySelectorAll('.charts-page .card:not(.rp-entry-card)')].map(c => [c.querySelector('h2')?.textContent, c.querySelector('p.sub')?.textContent, c.getBoundingClientRect().right <= innerWidth])""")
                 check(f"{lang} Charts with no record: every card shows its head and {words!r}, and fits the screen: {len(cards)} cards", len(cards) == 7 and all(c[0] and c[1] == words and c[2] for c in cards) and page.locator(".empty-state").count() == 0)
                 page.screenshot(path=str(Path(os.environ.get("LOOK_SHOTS", "/tmp")) / f"empty-charts-{lang}.png"))
                 page.context.close()

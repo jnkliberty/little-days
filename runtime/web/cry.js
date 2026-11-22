@@ -295,5 +295,7 @@ globalThis.LittleDaysCryLog = (() => {
     return q;
   }
 
-  return {careRows, order, rankOf, aboutUsual, median, snapshot, missingDays, isComplete, ageDaysOf, captureHeader, createQueue};
+  // feedPoints, sleepPoints, gapsOf and partOf also serve web/forecast.js (plan 2026-11-21, Group 1), so the gap math has one copy.
+  return {careRows, order, rankOf, aboutUsual, median, snapshot, missingDays, isComplete, ageDaysOf, captureHeader, createQueue,
+    feedPoints, sleepPoints, gapsOf, partOf};
 })();

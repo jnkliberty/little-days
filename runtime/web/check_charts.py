@@ -220,9 +220,9 @@ def audit_layout(page, language, theme):
     label = f'C6 {language} {theme}'
     en = language == 'en'
     heads = page.locator('.charts-page .chart-head h2, .charts-page > .card > h2').all_text_contents()
-    want = (['At a glance', 'Daily rhythm', 'Feeds per day', 'Sleep per day', 'Wet per day', 'Dirty per day', 'Growth'] if en else
-            ['De un vistazo', 'Ritmo diario', 'Tomas por día', 'Sueño por día', 'Pipí por día', 'Popó por día', 'Crecimiento'])
-    check(f'{label}: seven cards in the approved order, two diaper cards', heads == want, heads)
+    want = (['Reports', 'At a glance', 'Daily rhythm', 'Feeds per day', 'Sleep per day', 'Wet per day', 'Dirty per day', 'Growth'] if en else
+            ['Reportes', 'De un vistazo', 'Ritmo diario', 'Tomas por día', 'Sueño por día', 'Pipí por día', 'Popó por día', 'Crecimiento'])
+    check(f'{label}: eight cards in the approved order (Reports + seven charts)', heads == want, heads)
     check(f'{label}: eight bars (seven full days and Today) in each bar chart', all(len(page.locator(f'.plot[data-chart="{k}"] .col').all()) == 8 for k in ['feeds', 'sleep', 'wet', 'dirty']))
     rows = page.locator('.plot[data-chart="rhythm"] text[x="0"]').all_text_contents()
     check(f'{label}: eight rhythm rows, Today last', len(rows) == 8 and rows[-1] == ('Today' if en else 'Hoy'), rows)
@@ -451,7 +451,7 @@ def audit_empty(page, state):
     for lang, text, heads in [('en', 'No records yet.', ['At a glance', 'Daily rhythm', 'Feeds per day', 'Sleep per day', 'Wet per day', 'Dirty per day', 'Growth']),
                               ('es', 'Todavía no hay registros.', ['De un vistazo', 'Ritmo diario', 'Tomas por día', 'Sueño por día', 'Pipí por día', 'Popó por día', 'Crecimiento'])]:
         page.evaluate("lang=>{S.lang=lang;S.entries=[];S.growthEntries=[];render()}", lang)
-        cards = page.locator('.charts-page > .card, .charts-page .group > .card')
+        cards = page.locator('.charts-page > .card:not(.rp-entry-card), .charts-page .group > .card')
         got = [[c.locator('h2').inner_text(), c.locator('p.sub').inner_text()] for c in cards.all()]
         check(f'E1 {lang} with no record each card shows its head and the line {text}', got == [[h, text] for h in heads], got)
         check(f'E1 {lang} no plot and no table is drawn', page.locator('.plot, details').count() == 0)
@@ -465,7 +465,7 @@ def audit_empty(page, state):
 
 def audit_growth(page, state):
     check('GR1 one Growth card with three chips and the Weight chip on', page.locator('.growth-chips .chip').all_text_contents() == ['Weight', 'Length', 'Head size'] and
-          page.locator('.growth-chips .chip[aria-pressed="true"]').inner_text() == 'Weight' and page.locator('.charts-page .card', has_text='Growth').count() == 1)
+          page.locator('.growth-chips .chip[aria-pressed="true"]').inner_text() == 'Weight' and page.locator('.charts-page .card:not(.rp-entry-card)', has_text='Growth').count() == 1)
     check('GR1 the head is the plain band and there is no percentile band or curve', page.locator('.t-plain .chart-head h2', has_text='Growth').count() == 1 and
           page.locator('.plot[data-chart="growth"] [fill="var(--band)"]').count() == 0)
     for measure, label, readout_text, table in [('weight', 'Weight', 'Latest 4.2 kg at 7 weeks', [['2 weeks', '3.2 kg'], ['7 weeks', '4.2 kg']]),

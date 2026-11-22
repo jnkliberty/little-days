@@ -344,6 +344,22 @@ def audit_sleep_dock(browser, base, engine, width, height, inset, lang):
         check(f'{engine} {lang} {width}: the longer sleep verdict keeps the card height',
               page.locator('.insight').bounding_box()['height'] == height
               and (not fits or 0 < link_bottom <= dock_top))
+        align = page.evaluate('''() => { const c = document.querySelector('.insight').getBoundingClientRect(),
+          ico = document.querySelector('.insight .fact-content .ico').getBoundingClientRect(),
+          h = document.querySelector('.insight .fact-content h2').getBoundingClientRect(),
+          a = document.querySelector('.insight .fact-content .ask-pill').getBoundingClientRect(),
+          v = document.querySelector('.insight .fact-content .fact-viz').getBoundingClientRect();
+          const leftTarget = c.width - 32 <= 299 ? ico.left : h.left;
+          return {leftDiff: Math.round(v.left - leftTarget), rightDiff: Math.round(a.right - v.right), pad: Math.round(c.right - a.right)}; }''')
+        check(f'{engine} {lang} {width}: chart aligns with card column and ends at Ask with Stop sleep ({align})',
+              abs(align['leftDiff']) <= 2 and abs(align['rightDiff']) <= 2 and align['pad'] == 16)
+        show(page, 'trend:bottles:breakdown')
+        bottle_ok = page.evaluate('''() => { const card = document.querySelector('.insight .fact-content');
+          const bars = [...card.querySelectorAll('svg rect.bottle')].map(b => b.getBoundingClientRect());
+          return [...card.querySelectorAll('.viz-num')].every(n => { const r = n.getBoundingClientRect(), x = r.left + r.width / 2;
+            const bar = bars.reduce((best, b) => Math.abs(b.left + b.width / 2 - x) < Math.abs(best.left + best.width / 2 - x) ? b : best);
+            return Math.abs(bar.left + bar.width / 2 - x) <= 1 && r.bottom <= bar.top + 1 && r.bottom >= bar.top - 6; }); }''')
+        check(f'{engine} {lang} {width}: bottle numbers stay centered on their bars with Stop sleep', bottle_ok)
     finally:
         page.context.close()
 

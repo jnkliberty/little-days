@@ -107,8 +107,11 @@ export function createHousehold({ store, sessions, records }: { store: Store; se
     if (chart != null && (!isRecord(chart) || !Number.isSafeInteger(chart.childId) || Number(chart.childId) <= 0
       || (chart.sex !== 'girls' && chart.sex !== 'boys'))) throw new HttpError(400, 'Choose a supported growth chart.');
     const growthChart = isRecord(chart) ? { childId: chart.childId, sex: chart.sex } : null;
+    // The forecast facts switch (plan 2026-11-21, Group 1). Optional: an older client sends none, and none means on.
+    const forecast = payload.forecast;
+    if (forecast != null && forecast !== 'on' && forecast !== 'off') throw new HttpError(400, 'Choose on or off for the forecast.');
     return { lang: payload.lang, units: payload.units, palette: payload.palette, night: payload.night,
-      ...(growthChart ? { growthChart } : {}) };
+      ...(growthChart ? { growthChart } : {}), ...(forecast ? { forecast } : {}) };
   }
 
   async function state(session: Session, range?: Range) {

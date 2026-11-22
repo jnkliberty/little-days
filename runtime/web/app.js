@@ -2,6 +2,10 @@
 const W = {
   factPrevious:['Previous fact','Dato anterior'], factNext:['Next fact','Dato siguiente'], factPosition:[(n,total)=>`Fact ${n} of ${total}`,(n,total)=>`Dato ${n} de ${total}`],
   askAI:['Ask AI','Preguntar a IA'], factSource:['Source','Fuente'], bunnyTap:['Make the bunny hop','Hacer saltar al conejito'], factLog:['View log','Ver historial'], askShort:['Ask','Preguntar'],
+  fcFeed:['Feed forecast','Pronóstico de toma'], fcNap:['Nap forecast','Pronóstico de siesta'], fcBasis:['From her last 7 days','Según sus últimos 7 días'], fcPassed:['Window passed','La ventana ya pasó'], fcNow:['Now','Ahora'],
+  fcRange:[(a,b)=>`${a} to ${b}`,(a,b)=>`${a} a ${b}`],
+  fcAskFeed:[r=>`Why is her next feed forecast for ${r}?`,r=>`¿Por qué se pronostica su próxima toma de ${r}?`], fcAskNap:[r=>`Why is her next nap forecast for ${r}?`,r=>`¿Por qué se pronostica su próxima siesta de ${r}?`],
+  fcSetH:['Home','Inicio'], fcSetL:['Feed and nap forecasts','Pronósticos de toma y siesta'], fcOn:['On','Activado'], fcOff:['Off','Desactivado'],
   factEmpty:['A little more to discover','Hay más por descubrir'], factEmptyBody:['Facts will appear as her age and care records become available.','Los datos aparecerán cuando estén disponibles su edad y sus registros de cuidado.'],
   askAbout:[name=>`Ask AI about ${name}`,name=>`Preguntar a IA sobre ${name}`], aiNotice:['Not medical advice. For urgent symptoms, call your doctor or your local emergency number.','No es consejo médico. Con síntomas urgentes, llame a su médico o al número de emergencias.'],aiBlank:[name=>`What would you like to know about ${name}?`,name=>`¿Qué le gustaría saber sobre ${name}?`],
   aiSend:['Send','Enviar'], aiWaiting:['Reading her records…','Consultando sus registros…'], aiSources:['Sources','Fuentes'],
@@ -31,6 +35,19 @@ const W = {
   chartRhythmReading: [n => `Sleep and feed times for each of the last ${n} days, from 7 AM to 7 AM. The Timeline lists each record.`, n => `Horas de sueño y tomas de cada uno de los últimos ${n} días, de 7 a. m. a 7 a. m. El historial muestra cada registro.`],
   chartKeyboard: ['Pick a day. Use the left and right arrow keys.', 'Elija un día. Use las flechas izquierda y derecha.'],
   chartNight: ['Night, 7 PM to 7 AM', 'Noche, de 7 p. m. a 7 a. m.'],
+  normalLink: ['Is this normal?', '¿Es normal?'], normalKey: ['Typical for her age', 'Típico para su edad'],
+  normalLast: [n => n === 1 ? 'Her last full day' : `Her last ${n} full days`, n => n === 1 ? 'Su último día completo' : `Sus últimos ${n} días completos`], normalSource: ['Source', 'Fuente'],
+  normalTypical: [a => `Typical at ${a}`, a => /^1 /.test(a) ? `Típico con ${a}` : `Típico a los ${a}`], normalDays: [n => `${n} ${n === 1 ? 'day' : 'days'}`, n => `${n} ${n === 1 ? 'día' : 'días'}`], normalMonths: [n => `${n} months`, n => `${n} meses`],
+  normalRange: [(a, b) => `${a} to ${b} a day`, (a, b) => `${a} a ${b} al día`], normalRangeH: [(a, b) => `${a} to ${b} h a day`, (a, b) => `${a} a ${b} h al día`],
+  normalAtLeast: [(a, b) => `At least ${a} to ${b} a day`, (a, b) => `Al menos ${a} a ${b} al día`],
+  normal_below: ['Below the typical range for her age.', 'Por debajo del rango típico para su edad.'],
+  normal_inside: ['Inside the typical range for her age.', 'Dentro del rango típico para su edad.'],
+  normal_above: ['Above the typical range for her age.', 'Por encima del rango típico para su edad.'],
+  normalUnder4: ['No recommended range exists before 4 months. Babies this age vary widely.', 'No existe un rango recomendado antes de los 4 meses. A esta edad los bebés varían mucho.'],
+  normalNone: ['No trusted source gives a range for her age.', 'Ninguna fuente confiable da un rango para su edad.'],
+  normalVary: ['Babies vary. Ask the pediatrician if you are concerned.', 'Cada bebé es distinto. Consulte al pediatra si le preocupa algo.'],
+  normalUnit_feeds: ['feeds a day', 'tomas al día'], normalUnit_sleep: ['of sleep a day', 'de sueño al día'],
+  normalUnit_wet: ['wet diapers a day', 'pañales mojados al día'], normalUnit_dirty: ['dirty diapers a day', 'pañales sucios al día'],
   chartFeedsDay: ['Feeds per day', 'Tomas por día'], chartSleepDay: ['Sleep per day', 'Sueño por día'], chartWetDay: ['Wet per day', 'Pipí por día'], chartDirtyDay: ['Dirty per day', 'Popó por día'],
   chartMeasure: ['Measure', 'Medida'], headSize: ['Head size', 'Cabeza'], chartAge: ['Age', 'Edad'], chartBirth: ['Birth', 'Nacimiento'],
   chartWeeks: [n => `${n} ${n===1?'week':'weeks'}`, n => `${n} ${n===1?'semana':'semanas'}`],
@@ -232,7 +249,7 @@ function applyServerData(state,authoritative=false) {
 // A different adult or child starts clean: the old person's chat, facts and cached days go.
 function applyIdentity(state) {
   if(state.sleepPaused!==undefined)S.sleepPaused=state.sleepPaused;
-  if(hasNewIdentity(state)){resetChat();S.factId='';S.developmentBatch=null;S.developmentAttempt=null;S.entries=[];S.loadedRanges=new Set();S.photoFrom=null;replyOrder.days.clear();}
+  if(hasNewIdentity(state)){resetChat();S.factId='';fcSeen.clear();factMoved=false;S.developmentBatch=null;S.developmentAttempt=null;S.entries=[];S.loadedRanges=new Set();S.photoFrom=null;replyOrder.days.clear();}
   S.me=state.me;S.people=Array.isArray(state.people)?state.people:[];S.child=state.child||null;
 }
 // The days this reply asked for (the default is yesterday and today) take its entries, but only the days where no newer reply was applied. Returns whether any day did.
@@ -688,6 +705,7 @@ function factViz(f){
     +(v.letters?`<div class="viz-days viz-diff-days" style="--n:${v.bars.length}" aria-hidden="true">${v.letters.map((l,i)=>`<span${i===v.letters.length-1?' class="val"':''}>${esc(l)}</span>`).join('')}</div>`
       :`<div class="viz-foot" aria-hidden="true"><span>${esc(v.span)}</span><span class="val">${esc(v.todayLabel)}</span></div>`)+'</div>';
   if(v.kind==='week')return weekViz(v);
+  if(v.kind==='forecast')return forecastViz(v,label);
   if(v.kind==='growth')return LittleDaysCharts.growthLine(v.points,esc(v.label||f.body))+`<div class="viz-ends" aria-hidden="true"><span>${esc(v.first)}</span><span class="val">${esc(v.last)}</span></div>`;
   if(v.kind==='columns')return LittleDaysCharts.mini(v.bars,null,label)
     +`<div class="viz-days" style="--n:${v.bars.length}" aria-hidden="true">${v.bars.map(b=>`<span${b.today?' class="val"':''}>${esc(b.label)}</span>`).join('')}</div>`;
@@ -703,6 +721,33 @@ function weekViz(v){
   const head=v.change?`<span class="wk-head" aria-hidden="true">${esc(v.head)}</span>`:'';
   return `<div class="viz-week${v.change?' with-change':''}">${v.rows.map((r,i)=>`<div class="wk-row ${r.tone}" role="img" aria-label="${esc(r.label)}"><b class="wk-name" aria-hidden="true">${esc(r.name)}</b>${i?'':head}`
     +`<span class="wk-avg" aria-hidden="true">${esc(keepUnits(r.avg))}</span><span class="wk-bars" aria-hidden="true">${LittleDaysCharts.week(r.days)}</span>${v.change?`<span class="wk-change" aria-hidden="true">${esc(keepUnits(r.change||''))}</span>`:''}</div>`).join('')}</div>`;
+}
+// Forecast (look approved 2026-11-21, round 2): a time line from shortly before now to past the window, hour labels under it, the
+// window a box in the care tint (gray once passed), now the thin gray tick of the bottle drawing with "Now" under it.
+function forecastViz(v,label){
+  const a=Math.floor((Math.min(v.now,v.from)-15)/30)*30,b=Math.ceil((Math.max(v.now,v.to)+45)/30)*30,x=m=>(m-a)/(b-a)*280;
+  const x0=x(v.from),x1=Math.max(x(v.to),x0+16),pct=m=>`left:${(x(m)/2.8).toFixed(1)}%`;
+  const step=60*Math.ceil((b-a)/300),hours=[];for(let h=Math.ceil(a/step)*step;h<=b;h+=step)if(Math.abs(x(h)-x(v.now))>44&&x(h)>16&&x(h)<264)hours.push(h);
+  return `<svg class="fc-draw" viewBox="0 0 280 32" role="img" aria-label="${label}" focusable="false"><line class="fc-axis" x1="0" y1="16" x2="280" y2="16"/>`
+    +`<rect class="fc-win${v.passed?' past':''}" x="${x0.toFixed(1)}" y="5" width="${(x1-x0).toFixed(1)}" height="22" rx="6"/>`
+    +`<line class="now-tick" x1="${x(v.now).toFixed(1)}" x2="${x(v.now).toFixed(1)}" y1="0" y2="32" vector-effect="non-scaling-stroke"/></svg>`
+    +`<div class="fc-foot" aria-hidden="true">${hours.map(h=>`<span style="${pct(h)}">${axisH(((h/60)%24+24)%24).replace(/ /g,' ')}</span>`).join('')}<span class="val" style="${pct(v.now)}">${t('fcNow')}</span></div>`;
+}
+// A clock time from minutes, with or without AM/PM ("3:10", "3:40 PM"; Spanish "3:40 p. m."), kept on one line.
+const fcClock=(m0,period=true)=>{const m=((Math.round(m0)%1440)+1440)%1440,h=Math.floor(m/60),p=h<12?(S.lang==='es'?'a. m.':'AM'):(S.lang==='es'?'p. m.':'PM');return `${h%12||12}:${pad(m%60)}${period?` ${p}`:''}`;};
+const fcRange=(from,to)=>{const same=(Math.floor(((from%1440)+1440)%1440/720))===(Math.floor(((to%1440)+1440)%1440/720));return t('fcRange',fcClock(from,!same),fcClock(to));};
+// The feed and nap forecast facts. They lead the card while they show (owner, 2026-11-21: "R2 first"). Left out: the switch is off,
+// the care runs (a paused sleep counts as asleep), the adult may not view it, the 7 days are not loaded, too few gaps, or night (nap).
+function forecastFacts(){
+  if(S.preferences?.forecast==='off'||!globalThis.LittleDaysForecast)return [];
+  const today=todayISO(),now=nowExactM();
+  const out=LittleDaysForecast.forecast({entries:homeEntries(today),now,run:shownRun(),sleepRun:shownRun(S.sleepRun)||S.sleepPaused||null,
+    complete:LittleDaysCryLog.isComplete(homeReads,today)&&homeReads.has(today)&&homeReads.has(dayISO(-1)),feeds:resourceAllowed('feedings'),sleep:resourceAllowed('sleep')});
+  return [['feed',out.feed,'feeds'],['nap',out.nap,'sleep']].filter(([,f])=>f&&f.state!=='few').map(([kind,f,topic])=>{
+    const range=fcRange(f.from,f.to),title=t(kind==='feed'?'fcFeed':'fcNap'),note=t(f.state==='passed'?'fcPassed':'fcBasis');
+    return {id:`forecast:${kind}:${today}`,kind:'forecast',topic,title,headline:range,note,body:`${title}: ${range}. ${note}.`,
+      viz:{kind:'forecast',from:f.from,to:f.to,now,passed:f.state==='passed'},evidence:[{kind:'record',date:shiftISO(today,dayOf(f.last))}],ask:t(kind==='feed'?'fcAskFeed':'fcAskNap',range)};
+  });
 }
 // A duration ("14 h 51 min") stays on one line, as a number stays with its unit.
 const keepUnits=text=>joinUnits(text).replace(/(\d\u00a0h) (?=\d)/g,'$1\u00a0');
@@ -727,7 +772,7 @@ function statusCard() {
   // A sizer carries its fact's own links, because the links share their row with the arrows and can wrap.
   const sizers=(facts.length?facts:[{title,body}]).map(f=>`<span class="fact-size" aria-hidden="true"><i class="fs-icon"></i><b class="fs-title" data-text="${esc(f.title)}"></b>${askOn?`<i class="ask-space" data-text="${esc(t('askShort'))}"></i>`:''}${f.headline||f.viz?`<span class="fs-body fact-look">${factLook(f)}</span>`:`<span class="fs-body" data-text="${esc(f.body)}"></span>`}<span class="fs-link">${factRefs(f,true)}</span></span>`).join('');
   const nav=several?`<div class="fact-navigation"><button type="button" class="fact-arrow" data-act="fact-previous" aria-label="${t('factPrevious')}">${glyph('back')}</button><div class="fact-dots" role="img" aria-label="${esc(t('factPosition',Math.max(0,index+1),facts.length))}"><span aria-hidden="true">${dots}</span></div><button type="button" class="fact-arrow" data-act="fact-next" aria-label="${t('factNext')}">${glyph('chev')}</button></div>`:'';
-  return S.homeCardHTML=`<section class="card status insight ${tone}" aria-labelledby="fact-title" aria-roledescription="carousel" data-fact="${esc(fact?.id||'')}"><div class="fact-stack"><div class="fact-content">${iconBlock(art)}<h2 id="fact-title">${esc(title)}</h2>${askOn?`<button type="button" class="ask-pill" data-act="ask-ai" aria-label="${t('askAbout',esc(babyName()))}">${glyph('spark')}${t('askShort')}</button>`:''}${fact?.headline||fact?.viz?`<div class="fact-body fact-look">${factLook(fact)}</div>`:`<p class="fact-body">${esc(body)}</p>`}<div class="fact-actions">${refs}</div></div>${sizers}</div>${nav}</section>`;
+  return S.homeCardHTML=`<section class="card status insight ${tone}" aria-labelledby="fact-title" aria-roledescription="carousel" data-fact="${esc(fact?.id||'')}"><div class="fact-stack"><div class="fact-content">${iconBlock(art)}<h2 id="fact-title">${esc(title)}</h2>${askOn?`<button type="button" class="ask-pill" data-act="ask-ai"${fact?.kind==='forecast'?' data-arg="forecast"':''} aria-label="${t('askAbout',esc(babyName()))}">${glyph('spark')}${t('askShort')}</button>`:''}${fact?.headline||fact?.viz?`<div class="fact-body fact-look">${factLook(fact)}</div>`:`<p class="fact-body">${esc(body)}</p>`}<div class="fact-actions">${refs}</div></div>${sizers}</div>${nav}</section>`;
 }
 function renderHomeCard(){
   if(!homeVisible()||S.sheet||S.confirmStop)return;
@@ -861,10 +906,14 @@ function factPool(){
     ...input,entries:S.growthEntries,unavailable:S.growthUnavailable,chartSex:LittleDaysGrowthInsights.chartSex(S.preferences,S.child?.id)
   }):[];
   // Fun (daily facts, today's first, then milestone and about-her facts), then stat, alternating; Home opens on a fun card (owner, 2026-11-19).
-  return LittleDaysInsights.mix([...other.filter(f=>f.kind==='source'),...other.filter(f=>f.fun),...trends.filter(f=>f.fun),...trends.filter(f=>!f.fun),...growth,...other.filter(f=>f.kind!=='source'&&!f.fun)]);
+  return [...forecastFacts(),...LittleDaysInsights.mix([...other.filter(f=>f.kind==='source'),...other.filter(f=>f.fun),...trends.filter(f=>f.fun),...trends.filter(f=>!f.fun),...growth,...other.filter(f=>f.kind!=='source'&&!f.fun)])];
 }
+// A forecast that arrives after Home opens (the 7 days load later) still leads, once, unless the adult moved or paused the card.
+const fcSeen=new Set();
 function currentFact(facts){
-  const fact=facts.find(f=>f.id===S.factId)||facts[0];
+  const shown=facts.find(f=>f.id===S.factId),fresh=!factMoved&&!factPaused&&shown?.kind!=='forecast'&&facts.find(f=>f.kind==='forecast'&&!fcSeen.has(f.id));
+  const fact=fresh||shown||facts[0];
+  if(fact?.kind==='forecast')fcSeen.add(fact.id);
   S.factId=fact?.id||'';
   return fact;
 }
@@ -885,14 +934,18 @@ function showNewestTurn(){const th=$('.chat-thread'),turn=th?.lastElementChild;i
 function fitChatField(){const field=$('#ai-question');if(!field)return;field.style.height='auto';field.style.height=`${Math.min(field.scrollHeight,132)}px`;}
 // render() hands the old scroll position to the next screen; Home starts at its top, where the pill is.
 function closeChat(){S.tab='home';render();refreshHomeEvidence();$('[data-scroll]').scrollTop=0;$('[data-act="ask-ai"]')?.focus({preventScroll:true});}
-async function openChat(){
+// A question (Ask on a forecast fact) goes into the field and is sent once the chat is known to be available.
+async function openChat(question=''){
   if(!LittleDaysAPI.ai)return;
+  if(question&&!S.chat.loading&&!S.chat.draft.trim())S.chat.draft=question;
   S.tab='chat';render();focusChat();showNewestTurn();
-  if(S.chat.available!==null||S.chat.checking)return;
-  const chat=S.chat;chat.checking=true;render();
-  try{const status=await LittleDaysAPI.aiStatus();if(S.chat===chat&&S.auth==='ready')chat.available=status.available===true;}
-  catch(error){if(S.chat===chat){if(error.status===401){await signInAgain(false);return;}chat.available=false;}}
-  finally{if(S.chat===chat){chat.checking=false;render();}}
+  if(S.chat.available===null&&!S.chat.checking){
+    const chat=S.chat;chat.checking=true;render();
+    try{const status=await LittleDaysAPI.aiStatus();if(S.chat===chat&&S.auth==='ready')chat.available=status.available===true;}
+    catch(error){if(S.chat===chat){if(error.status===401){await signInAgain(false);return;}chat.available=false;}}
+    finally{if(S.chat===chat){chat.checking=false;render();}}
+  }
+  if(question&&S.chat.available&&S.chat.draft===question)await submitChat();
 }
 const chatErrorKey=status=>status===429?'aiLimit':status===503?'aiUnavailable':'aiFailed';
 // A question joins the thread as soon as it is sent, and its answer lands under the same bubble.
@@ -1012,7 +1065,7 @@ function homeHTML() {
   const tiles=LittleDaysCryUI.homeTilesHTML(`<section class="tiles" aria-label="${t('logAria')}">${tileHTML()}</section>`);
   const question=LittleDaysCryUI.askHTML(),insight=statusCard();
   const first=homeHeader()+(runs.length?`<div class="group">${runs.join('')}</div>`:'')+tiles+(question||insight);
-  return `<div class="wrap"><div class="home-first">${first}</div>${question?insight:''}${body}${homeNav()}</div>`;
+  return `<div class="wrap"><div class="home-first">${first}</div>${question?insight:''}${LittleDaysReportsUI.homeCardHTML()}${body}${homeNav()}</div>`;
 }
 function themeRow(){const m=themeMode();return `<div class="theme-row"><span class="fl" id="theme-label">${t('themeTitle')}</span><div class="seg3" role="group" aria-labelledby="theme-label">${[['auto','themeAuto'],['on','themeOn'],['off','themeOff']].map(([k,w])=>`<button type="button" class="chip" data-act="theme" data-arg="${k}" aria-pressed="${m===k}">${ic('check','ck')}${t(w)}</button>`).join('')}</div><p>${t('themeHint')}</p></div>`;}
 function upcomingAppointmentsHTML(){
@@ -1337,15 +1390,42 @@ function barCard(spec) {
   if(!resourceAllowed(spec.resource))return '';
   if(!S.chartRows.some(row=>row[spec.key]!==null))return chartNoRecords(spec.cls,spec.icon,title);
   const rows=S.chartRows.map(row=>[chartIsToday(row)?t('chartToday'):chartDay(row.offset),...spec.cells(row)]);
-  return chartCard(spec.cls,spec.icon,title,chartReadout(),chartPlot(spec.kind,true),chartDetails(spec.kind,spec.head,rows,title));
+  const band=normBand(spec.kind), key=band?`<p class="nr-key"><svg width="16" height="12" aria-hidden="true"><rect x="1" y="1" width="14" height="10" rx="2" class="nr-band"/></svg>${normKeyText(band)}</p>`:'';
+  const link=`<button type="button" class="textlink nr-link" data-act="normal" data-arg="${spec.kind}" data-focus="normal-${spec.kind}">${t('normalLink')}${glyph('chev')}</button>`;
+  return chartCard(spec.cls,spec.icon,title,chartReadout(),chartPlot(spec.kind,true)+key+link,chartDetails(spec.kind,spec.head,rows,title));
 }
 function barPlot(spec,w) {
-  const rows=S.chartRows, n=rows.length, title=t(spec.title);
+  const rows=S.chartRows, n=rows.length, title=t(spec.title), band=normBand(spec.kind);
+  // A band is part of the scale, so its top is never cut off (an open band needs only its low figure in view).
+  const bandTop=band?(band.kind==='range'?band.high:band.low):0;
   const values=rows.map(row=>spec.parts.map(([key])=>(row[key]||0)/spec.div));
-  const {max,ticks}=LittleDaysCharts.scale(spec.base,spec.step,Math.max(0,...values.map(v=>v.reduce((a,b)=>a+b,0))));
-  const panel={max,ticks,tick:spec.hours?hours=>hours?`${hours} ${t('hrs')}`:'0':String,colors:spec.parts.map(p=>p[1]),names:spec.parts.map(p=>p[2]&&t(p[2]))};
+  const {max,ticks}=LittleDaysCharts.scale(spec.base,spec.step,Math.max(bandTop,...values.map(v=>v.reduce((a,b)=>a+b,0))));
+  const panel={max,ticks,tick:spec.hours?hours=>hours?`${hours} ${t('hrs')}`:'0':String,colors:spec.parts.map(p=>p[1]),names:spec.parts.map(p=>p[2]&&t(p[2])),
+    band:band&&{low:band.low,high:band.high,open:band.kind==='atLeast'}};
   const plotRows=rows.map((row,i)=>({x:i===n-1?t('today'):chartLetter(row.offset),part:i===n-1,v:values[i]}));
-  return LittleDaysCharts.columns(w,esc(`${title}. ${t('chartKeyboard')}`),plotRows,panel,rows.map(row=>row.date),`chart-${spec.kind}`,'');
+  return LittleDaysCharts.columns(w,esc(`${title}. ${t('chartKeyboard')}${band?` ${normKeyText(band)}.`:''}`),plotRows,panel,rows.map(row=>row.date),`chart-${spec.kind}`,'');
+}
+
+/* "Is this normal?" (plan 2026-11-21, Group 2; look A approved by owner 2026-11-22). Ranges come only from web/age-norms.js.
+   Plain words, no color for a value outside the range (J11). */
+const NORM_METRIC={feeds:'feeds',sleep:'sleepHours',wet:'wet',dirty:'dirty'};
+const childAgeDays=()=>{const d=-isoDay(S.child?.birthDate);return d>=0?d:NaN;};
+const normRow=kind=>LittleDaysAgeNorms.normFor(NORM_METRIC[kind],childAgeDays());
+const normBand=kind=>{const row=normRow(kind);return row&&row.kind!=='under4'?row:null;};
+const normFigure=row=>t(row.kind==='atLeast'?'normalAtLeast':row.metric==='sleepHours'?'normalRangeH':'normalRange',row.low,row.high);
+const normKeyText=row=>{const f=normFigure(row);return `${t('normalKey')}: ${f.charAt(0).toLowerCase()}${f.slice(1)}`;};
+const normAge=days=>days<=28?t('normalDays',days):t('normalMonths',Math.floor(days/30.4375));
+function normalSheet(s){
+  const spec=barSpecs().find(b=>b.kind===s.chart);
+  if(!spec)return '';
+  const summary=LittleDaysTrends.summarize(...chartArguments()), avg=summary.metrics[spec.key==='feedCount'?'feeds':spec.key].average, row=normRow(spec.kind);
+  // Compare the figure the sheet shows (whole minutes, one decimal), so "12 h" never sits beside "Below 12 to 16 h".
+  const value=avg===null?null:spec.hours?Math.round(avg)/60:Number(chartOne(avg)), where=row&&LittleDaysAgeNorms.place(value,row);
+  const number=avg===null?`<p>${t('chartNoneYet')}</p>`:`<p class="nr-avg"><b>${spec.hours?chartDuration(avg):chartOne(avg)}</b> ${t(`normalUnit_${spec.kind}`)}</p><p class="sub">${t('normalLast',summary.days.length)}</p>`;
+  const range=!row?`<p>${t('normalNone')}</p>`:row.kind==='under4'?`<p>${t('normalUnder4')}</p>`
+    :`<p class="nr-typ"><span class="sub">${t('normalTypical',normAge(childAgeDays()))}</span><b>${normFigure(row)}</b></p>${where?`<p>${t(`normal_${where}`)}</p>`:''}`;
+  const src=row?`<p class="nr-src"><span class="sub">${t('normalSource')}</span>${row.sources.map(x=>`<a class="textlink" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.name[S.lang==='es'?1:0])}</a>`).join('')}</p>`:'';
+  return bottomSheet(t(spec.title),`${number}${range}${src}<p class="sub">${t('normalVary')}</p>`,`<div class="sh-foot"><button type="button" class="btn" data-act="cancel">${t('close')}</button></div>`);
 }
 
 /* Daily rhythm: a row for each chart day, 7 AM to 7 AM. */
@@ -1468,7 +1548,7 @@ function chartsHTML() {
   S.chartRows=[...data.days,data.today];S.chartRenderedMinute=`${todayISO()}:${nowM()}`;S.chartDirty=false;
   const cards=status?`<section class="card"><h2>${t('glance')}</h2>${status}</section>`:
     `${glanceSectionHTML(args)}${rhythmCard(S.chartRows)}<div class="group">${barSpecs().map(barCard).join('')}</div>${growthCard()}`;
-  return `<div class="wrap charts-page">${cards}</div>`;
+  return `<div class="wrap charts-page">${LittleDaysReportsUI.chartsCardHTML()}${cards}</div>`;
 }
 function glanceSectionHTML(args) {
   const summary=LittleDaysTrends.summarize(...args);
@@ -1485,19 +1565,21 @@ function photosHTML() {
   const add=resourceAllowed('notes','add')?`<button type="button" class="btn" data-act="open-photo">${t('photoAdd')}</button>`:'';
   const photos=S.entries.filter(e=>e.photo),total=photos.length,found=photos.findIndex(e=>String(e.id)===S.photoId),p=found>=0?found:Math.max(0,total-1),entry=photos[p];  // the large photo is the one picked, else the newest
   const older=`<button type="button" class="btn" data-act="photos-older">${t('photosOlder')}</button>`;
-  if(!entry)return `<div class="card"><div class="strip f-off"><h2>${t('photosT',esc(babyName()))}</h2></div><div class="body">${emptyState('camera',t('photosEmpty'),add)}${older}</div></div>`;
+  const timelapse=LittleDaysExtrasUI.photosCardHTML();
+  if(!entry){const inFirstWindow=S.photoFrom==null||S.photoFrom>=-(PHOTO_DAYS-1);const emptyText=(inFirstWindow&&LittleDaysExtrasUI.photosEmptyText())||t('photosEmpty');return `${timelapse}<div class="card"><div class="strip f-off"><h2>${t('photosT',esc(babyName()))}</h2></div><div class="body">${emptyState('camera',emptyText,add)}${older}</div></div>`;}
   const main=`<img src="${esc(entry.photo)}" alt="${esc(entry.photoName||entry.title||t('photoAdd'))}" style="display:block;width:100%;height:auto">`,caption=esc(entry.title||entry.photoName||t('note'));
   const thumbs=photos.map((e,i)=>`<button type="button" class="pth" data-act="photo" data-arg="${i}" aria-pressed="${i===p}" aria-label="${esc(e.title||e.photoName||t('photoAdd'))}"><img src="${esc(e.photo)}" alt="" style="display:block;width:100%;height:auto"></button>`).join('');
-  return `<div class="card"><div class="strip f-off"><h2>${t('photosT',esc(babyName()))}</h2>${add}</div><div class="body"><div class="pbig">${main}</div><div class="pcap">${caption}</div>${photos.length>1?`<div class="pthumbs">${thumbs}</div>`:''}${older}</div></div>`;
+  return `${timelapse}<div class="card"><div class="strip f-off"><h2>${t('photosT',esc(babyName()))}</h2>${add}</div><div class="body"><div class="pbig">${main}</div><div class="pcap">${caption}</div>${photos.length>1?`<div class="pthumbs">${thumbs}</div>`:''}${older}</div></div>`;
 }
 // Opening Photos loads the last 31 days (the server takes 31 days or fewer in one request); Load older adds the 31 days before them.
 // photoFrom is the oldest day asked for, as a day offset from today. A load that failed leaves it where it was.
 const PHOTO_DAYS=31;
 async function loadPhotos(older=false) {
+  if(!older)void LittleDaysExtrasUI.loadPhotosList();
   if(S.photoLoading||S.auth!=='ready'||(older?S.photoFrom==null:S.photoFrom!=null))return;
   const last=older?S.photoFrom-1:0,first=last-PHOTO_DAYS+1;
   S.photoLoading=true;
-  try{await loadDayRange(first,last);if(S.loadedRanges?.has(dayISO(first)))S.photoFrom=first;}
+  try{await loadDayRange(first,last);if(S.loadedRanges?.has(dayISO(first))){S.photoFrom=first;if(S.tab==='photos')render();}}
   finally{S.photoLoading=false;}
 }
 
@@ -1777,6 +1859,7 @@ function settingsSheet(s) {
     ${group(t('unitsL'),pick('units',[['metric','ml'],['us','oz']],unitsOf()))}
     ${group(t('nightL'),nav(`<strong>${t('dimSchedule')}</strong><span class="sub">${dimWord}</span>`,'data-act="night-open"'),'nav')}
     ${nightOpen?`<section class="card settings-card" data-night>${themeRow()}<button type="button" class="chip" data-setting="night" data-focus="setting-night" aria-pressed="${S.night}">${glyph('check')}${t('nightRules')}</button></section>`:''}
+    ${group(t('fcSetH'),`<div class="form-field"><span class="fl" id="fc-l">${t('fcSetL')}</span>${pick('forecast',[['on',t('fcOn')],['off',t('fcOff')]],S.preferences?.forecast==='off'?'off':'on').replace('role="group"','role="group" aria-labelledby="fc-l"')}</div>`)}
     ${LittleDaysCryUI.settingsHTML()}
     ${LittleDaysAPI.careLink?group(t('careConn'),nav(`<strong class="conn">${S.careData?.exportOptIn?glyph('check'):''}${care}</strong>`,'data-act="open-care"'),'nav'):''}
     <section class="card settings-card"><p class="line">${t('signedInAs')} <strong class="account-name">${esc(shownName(S.me))}</strong></p><button type="button" class="back" data-extra data-shell="logout">${t('logout')}</button></section></div>`,null);
@@ -2078,7 +2161,7 @@ function correctionSheet(s){const started=localClock(s.start),date=new Intl.Date
 const correctionHint=s=>s.correctClock&&!parseClock(s.correctClock)?t('hintClock'):t('correctRange');
 function validCorrection(s){if(!validDate(s.date)||!Number.isInteger(+s.hour)||+s.hour<1||+s.hour>12||!Number.isInteger(+s.minute)||+s.minute<0||+s.minute>59||!['AM','PM'].includes(s.period))return false;const end=Date.parse(localISOAt(isoDay(s.date)*1440+((+s.hour%12)+(s.period==='PM'?12:0))*60 + +s.minute)),start=Date.parse(s.start),limit=Math.min(Date.parse(s.maxEnd),Date.now());return Number.isFinite(end)&&Number.isFinite(start)&&end>start&&end-start<=86400000&&end<=limit;}
 function discardSheet(s){return `<div class="over"><aside class="bsheet" key="sheet:discard" data-sheet role="dialog" aria-modal="true" aria-label="${esc(t('discard'))}"><div class="grab"></div><div class="sh-head"><span></span><h2>${t('discard')}</h2><span></span></div><div class="sh-body"><p>${t('unsaved')}</p><button class="btn solid" data-act="keep">${t('keepEditing')}</button><button class="btn" data-act="discard">${t('discard')}</button></div></aside></div>`;}
-const SHEETS = {split:splitSheet, discard:discardSheet, edit:editSheet, quick: quickSheet, handoff: handoffSheet, reminder: reminderSheet, growth: growthSheet, feed: feedSheet, diaper: diaSheet, sleep: sleepSheet, more: moreSheet, settings: settingsSheet, care: careSheet, med: medSheet, temp: tempSheet, note: noteSheet, appointment:appointmentSheet, visit:visitSheet, duty: dutySheet, confirm: confirmSheet, correction:correctionSheet};
+const SHEETS = {split:splitSheet, discard:discardSheet, edit:editSheet, quick: quickSheet, handoff: handoffSheet, reminder: reminderSheet, growth: growthSheet, feed: feedSheet, diaper: diaSheet, sleep: sleepSheet, more: moreSheet, settings: settingsSheet, care: careSheet, med: medSheet, temp: tempSheet, note: noteSheet, appointment:appointmentSheet, visit:visitSheet, duty: dutySheet, confirm: confirmSheet, correction:correctionSheet, normal: normalSheet};
 
 /* ---------- actions ---------- */
 function localISOAt(offsetMinutes) {
@@ -2198,6 +2281,7 @@ function finalOperation(result,label,context={}){
     if(S.retrySame===context.operationOwner||S.retrySame===context.sheet)S.retrySame=null;S.retryAction=null;
     if(context.onSaved)context.onSaved(result);
     if(context.growth)growthChanged();
+    if(context.photoChanged){LittleDaysExtrasUI.invalidatePhotos();if(S.tab==='photos')queueMicrotask(()=>LittleDaysExtrasUI.loadPhotosList(true));}
     if(context.clearToast)clearPendingToast(context.clearToast);
     S.pendingSheetOperation=null;delete S.pendingOps[id];S.message='';
     homeReadAttempts.clear();
@@ -2269,7 +2353,7 @@ async function acceptWrite(result,label,context={}){
   throw new Error(t('unknownSave'));
 }
 async function addEntries(list,label,photoFile=null,opts={}) {
-  const draft=S.sheet,ctx={sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,operationOwner:draft,...opts};
+  const draft=S.sheet,ctx={sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,photoChanged:!!photoFile,operationOwner:draft,...opts};
   S.busy=true;S.message='';render();
   try{
     const bodies=draft?(draft._preparedEvents||(draft._preparedEvents=list.map(event=>withLoggedBy(eventForAPI(event),draft)))):list.map(eventForAPI);let last=null;
@@ -2319,10 +2403,10 @@ function editOtherValues(e,s){if(e.type==='other'&&e.what==='solids')Object.assi
 function reminderPayload(recipient,what,date,hour,minute,period,enabled){const day=isoDay(date),h=+hour,m=+minute;if(!Number.isFinite(day)||!Number.isInteger(h)||h<1||h>12||!Number.isInteger(m)||m<0||m>59)throw new Error(t('saveFailed'));return {recipient,what,scheduledAt:localISOAt(day*1440+(h%12+(period==='PM'?12:0))*60+m),enabled:!!enabled};}
 function editForAPI(e,s){const body=withLoggedBy(eventForAPI(e),s);if(!s.loadedRange)return body;const r=editRange(s);return {...body,time:exactISOAt(r.start),start:exactISOAt(r.start),end:exactISOAt(r.end),duration:r.end-r.start,expected:s.loadedRange.expected};}
 async function saveEdit(s){const original=[...S.entries,...S.upcomingAppointments].find(x=>String(x.id)===String(s.id));if(!original||!validEdit(original,s))return;const e={...original};editBase(e,s);editEntryValues(e,s);let body=e.type==='reminder'?reminderPayload(s.valueRecipient,s.valueWhat,s.valueDate,s.valueHour,s.valueMinute,s.valuePeriod,s.valueEnabled):editForAPI(e,s);if((e.type==='note'||e.what==='mile')&&s.photoRemoved&&!s.photoFile)body.removePhoto=true;body=s._preparedBody||(s._preparedBody=body);
-  const draft=S.sheet,op=operationFor(s);S.busy=true;S.message='';render();try{const result=e.type==='reminder'?await LittleDaysAPI.writes.saveReminder(e.id,body,op):draft.photoFile?await LittleDaysAPI.writes.savePhoto({...body,id:e.id},draft.photoFile,op):await LittleDaysAPI.writes.updateEntry(e.id,body,op);const ctx={sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,operationOwner:s,growth:e.type==='growth'};await acceptWrite(result,()=>t('saved'),ctx);}catch(error){await recoverWrite(error,()=>t('saved'),{sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,operationOwner:s,growth:e.type==='growth',retry:()=>saveEdit(s)});}finally{S.busy=false;render();}}
+  const draft=S.sheet,op=operationFor(s);S.busy=true;S.message='';render();try{const result=e.type==='reminder'?await LittleDaysAPI.writes.saveReminder(e.id,body,op):draft.photoFile?await LittleDaysAPI.writes.savePhoto({...body,id:e.id},draft.photoFile,op):await LittleDaysAPI.writes.updateEntry(e.id,body,op);const ctx={sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,photoChanged:!!(draft.photoFile||body.removePhoto||original.photo),operationOwner:s,growth:e.type==='growth'};await acceptWrite(result,()=>t('saved'),ctx);}catch(error){await recoverWrite(error,()=>t('saved'),{sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,photoChanged:!!(draft.photoFile||body.removePhoto||original.photo),operationOwner:s,growth:e.type==='growth',retry:()=>saveEdit(s)});}finally{S.busy=false;render();}}
 async function deleteEntry(s){if(!s||!window.confirm(t('confirmDelete')))return;return removeEntry(s,S.sheet,{retry:()=>deleteEntry(s)});}
 // The delete request itself, for the edit form (draft = its open form) and the Timeline swipe (no form; `more` adds its own callbacks and wording).
-async function removeEntry(s,draft,more={}){const owner=s._deleteOperation||(s._deleteOperation={}),op=operationFor(owner),label=more.label||(()=>t('saved')),ctx={sheet:draft,close:!!draft,operationOwner:owner,growth:S.entries.some(x=>String(x.id)===String(s.id)&&x.type==='growth'),retry:()=>removeEntry(s,draft,more),...more};S.busy=true;S.message='';render();try{const result=await LittleDaysAPI.writes.deleteEntry(s.id,op,more.keepalive);await acceptWrite(result,label,ctx);}catch(error){await recoverWrite(error,label,ctx);}finally{S.busy=false;render();}}
+async function removeEntry(s,draft,more={}){const owner=s._deleteOperation||(s._deleteOperation={}),op=operationFor(owner),label=more.label||(()=>t('saved')),ctx={sheet:draft,close:!!draft,operationOwner:owner,growth:S.entries.some(x=>String(x.id)===String(s.id)&&x.type==='growth'),photoChanged:S.entries.some(x=>String(x.id)===String(s.id)&&!!x.photo),retry:()=>removeEntry(s,draft,more),...more};S.busy=true;S.message='';render();try{const result=await LittleDaysAPI.writes.deleteEntry(s.id,op,more.keepalive);await acceptWrite(result,label,ctx);}catch(error){await recoverWrite(error,label,ctx);}finally{S.busy=false;render();}}
 async function saveSplit(s){
   if(!validSplit(s))return;
   const body=s._preparedBody||(s._preparedBody={wokeAt:new Date(splitClock(s,'woke')).toISOString(),sleptAt:new Date(splitClock(s,'slept')).toISOString(),expected:s.expected}),op=operationFor(s),context={sheet:s,close:true,operationOwner:s,retry:()=>saveSplit(s)};
@@ -2565,6 +2649,7 @@ function viewAction(a,arg){const s=S.sheet;switch(a){
     case 'growth-recumbent': if(s?.kind==='growth')Object.assign(s,{recumbent:!s.recumbent,dirty:true});break;
     case 'retry-growth': void loadGrowthHistory(); break;
     case 'chart': S.chart = arg; break;
+    case 'normal': S.sheet = {kind: 'normal', chart: arg}; break;
     case 'photo': pickPhoto(arg); break;
     case 'photos-older': void loadPhotos(true); break;
     case 'tab': S.tab = arg;queueMicrotask(()=>openedTab(arg));break;
@@ -2596,7 +2681,8 @@ function stopGate(a){
 const BUSY_OK=new Set(['undo','swipe-undo']);
 // Actions that run one function and return its result. A table keeps act() under the complexity limit.
 const CALL_ACTS={
-  'ask-ai':()=>openChat(),
+  // Ask on a forecast fact sends the question about its window (owner, 2026-11-21, R3 (a): no background AI call).
+  'ask-ai':arg=>openChat(arg==='forecast'?currentFact(S.renderedFacts||[])?.ask||'':''),
   'chat-back':()=>closeChat(),
   'ai-retry':arg=>submitChat(+arg),
   'delete-entry':(arg,s)=>deleteEntry(s),
@@ -2620,7 +2706,7 @@ function factAction(a,arg){
   }
   return false;
 }
-function act(a,arg){if(a.startsWith('cry-')&&LittleDaysCryUI.handle(a,arg))return;const s=S.sheet;if(S.busy&&!BUSY_OK.has(a))return;
+function act(a,arg){if(a.startsWith('cry-')&&LittleDaysCryUI.handle(a,arg))return;if(a.startsWith('report-')&&LittleDaysReportsUI.handle(a,arg))return;if(a.startsWith('extras-')&&LittleDaysExtrasUI.handle(a,arg))return;const s=S.sheet;if(S.busy&&!BUSY_OK.has(a))return;
   if((a.startsWith('open-')||a==='quick')&&!S.retryAction&&!Object.keys(S.pendingOps||{}).length)S.message='';
   if(a==='quick'&&arg==='solids')queueMicrotask(()=>loadFoods());
   if(stopGate(a)||feedbackAction(a,arg)||factAction(a,arg))return;
@@ -2656,17 +2742,17 @@ function appHTML() {
   if(S.tab==='chat'&&!LittleDaysAPI.ai)S.tab='home';
   markFormClosed();settlePhotoBusy();settleConfirmStop();syncSwipeDelete();
   const sh=S.sheet?(S.sheet.kind==='cancelSleep'?cancelSleepSheet(S.sheet):SHEETS[S.sheet.kind](S.sheet)):'',toast=toastHTML();
-  // The Crying screens and their questions sit on top of the app like a form (cry-ui.js).
-  const cry=LittleDaysCryUI.layerHTML(),cryOpen=LittleDaysCryUI.open();
-  const cls=(S.night?'app phone night':'app phone')+(S.sheet&&S.sheet.kind!=='discard'&&S.sheet.kind!=='confirm'||cryOpen?' form-open':'');
+  // The Crying screens, Reports sheets, and Extras layers sit on top of the app like a form.
+  const cry=LittleDaysCryUI.layerHTML(),reports=LittleDaysReportsUI.layerHTML(),extras=LittleDaysExtrasUI.layerHTML(),layerOpen=LittleDaysCryUI.open()||LittleDaysReportsUI.open()||LittleDaysExtrasUI.open();
+  const cls=(S.night?'app phone night':'app phone')+(S.sheet&&!['discard','confirm','normal'].includes(S.sheet.kind)||layerOpen?' form-open':'');
   const titles={log:'tabLog',charts:'tabCharts',photos:'tabPhotos',chat:'askAI'};
   // Every screen but Home has the same title bar. Ask keeps its own Home action (it puts focus back on the Ask button on Home) and a focusable title.
   const chat=S.tab==='chat',home=chat?'data-act="chat-back"':'data-act="tab" data-arg="home"',h1=chat?' id="chat-title" data-focus="chat-title" tabindex="-1"':'';
   const top=S.tab==='home'?'':`<header class="bar screen-top"><button type="button" class="back" ${home}>${glyph('back')}${t('tabHome')}</button><h1${h1}>${t(titles[S.tab]||'tabHome')}</h1>${S.tab==='log'?tlBarEnd():''}</header>`;
   // The chat scrolls its own thread, so it skips the shared scroll area and the dock.
   const screen=S.tab==='home'?homeHTML():S.tab==='log'?timelineHTML():S.tab==='charts'?chartsHTML():photosHTML();
-  const body=S.tab==='chat'?chatHTML():`<div class="scroll" data-scroll>${screen}</div>${S.tab==='home'&&!S.sheet&&!cryOpen?dockHTML():''}`;
-  return `<div class="${cls}" lang="${S.lang}"><input id="retry-photo-picker" type="file" accept="image/jpeg,image/png,image/webp" hidden><div class="main" ${S.sheet||S.confirmStop||cryOpen?'inert':''}>${top}${body}</div>${S.confirmStop||LittleDaysCryUI.sheetOpen()?sh.replace('data-sheet','inert data-sheet'):sh}${cry}${toast}${confirmStopHTML()}</div>`;
+  const body=S.tab==='chat'?chatHTML():`<div class="scroll" data-scroll>${screen}</div>${S.tab==='home'&&!S.sheet&&!layerOpen?dockHTML():''}`;
+  return `<div class="${cls}" lang="${S.lang}"><input id="retry-photo-picker" type="file" accept="image/jpeg,image/png,image/webp" hidden><div class="main" ${S.sheet||S.confirmStop||layerOpen?'inert':''}>${top}${body}</div>${S.confirmStop||LittleDaysCryUI.sheetOpen()?sh.replace('data-sheet','inert data-sheet'):sh}${cry}${reports}${extras}${toast}${confirmStopHTML()}</div>`;
 }
 const keyOf = e => e && e.dataset ? (e.dataset.focus ? 'focus|' + e.dataset.focus : e.dataset.act ? e.dataset.act + '|' + (e.dataset.arg || '') : e.dataset.fid ? 'fid|' + e.dataset.fid : '') : '';
 // Skip the page behind an open sheet: the Home dock and the Sleep sheet both hold Stop sleep.
@@ -2795,6 +2881,8 @@ document.addEventListener('click',ev=>{if(ev.target?.type==='file')ev.target._pi
 document.addEventListener('cancel',ev=>{if(ev.target?.type==='file')S.overlayClosedAt=performance.now();},true);
 function render() {
   LittleDaysCryUI.checkOwner();  // each sign-in, switch and sign-out stops the last adult's cry queues and recordings
+  LittleDaysReportsUI.checkOwner();
+  LittleDaysExtrasUI.checkOwner();
   queueMicrotask(syncFactCarousel);
   if(chartDrag){S.chartDirty=true;return;}
   if(factSwipe&&S.auth==='ready'&&S.tab==='home'){factRedraw='full';return;}
@@ -2847,7 +2935,7 @@ document.addEventListener('click', ev => {
   S.lastClick = keyOf(b);
   act(b.dataset.act, b.dataset.arg);
 });
-async function retrySelectedPhoto(file){const retry=S.photoRetry;if(!retry||!file)return;file=await preparePhoto(file);if(!file)return;const problem=photoProblem(file);if(problem){S.message=photoErrorText(problem);render();return;}const owner={_operationId:retry.operationId,_preparedEvents:retry.event?[retry.event]:[]},context={operationOwner:owner,undoable:false,toast:false,retry:()=>document.querySelector('#retry-photo-picker')?.click()};S.busy=true;S.pendingSheetOperation=null;S.message=t('saving');render();try{const result=retry.portrait?await LittleDaysAPI.writes.savePortrait(file,retry.operationId):await LittleDaysAPI.writes.savePhoto(retry.event,file,retry.operationId);await acceptWrite(result,()=>retry.portrait?t('portraitSaved'):t('savedItem',t('note')),context);if(result.status==='saved')S.photoRetry=null;}catch(error){await recoverWrite(error,()=>t('savedItem',t('note')),context);}finally{S.busy=false;render();}}
+async function retrySelectedPhoto(file){const retry=S.photoRetry;if(!retry||!file)return;file=await preparePhoto(file);if(!file)return;const problem=photoProblem(file);if(problem){S.message=photoErrorText(problem);render();return;}const owner={_operationId:retry.operationId,_preparedEvents:retry.event?[retry.event]:[]},context={operationOwner:owner,photoChanged:!retry.portrait,undoable:false,toast:false,retry:()=>document.querySelector('#retry-photo-picker')?.click()};S.busy=true;S.pendingSheetOperation=null;S.message=t('saving');render();try{const result=retry.portrait?await LittleDaysAPI.writes.savePortrait(file,retry.operationId):await LittleDaysAPI.writes.savePhoto(retry.event,file,retry.operationId);await acceptWrite(result,()=>retry.portrait?t('portraitSaved'):t('savedItem',t('note')),context);if(result.status==='saved')S.photoRetry=null;}catch(error){await recoverWrite(error,()=>t('savedItem',t('note')),context);}finally{S.busy=false;render();}}
 async function readPhoto(target){const picked=target.files?.[0],id=target.dataset.fid;S.overlayClosedAt=performance.now();target._picking=false;if(target.id!=='retry-photo-picker')target.value='';if(target.id==='retry-photo-picker'){void retrySelectedPhoto(picked);target.value='';return;}if(!picked||id==='portrait'&&!resourceAllowed('children','change'))return;const draft=S.sheet,f=await preparePhoto(picked);if(!f)return;const problem=photoProblem(f);if(problem){if(id==='portrait')S.portraitError=problem;else if(S.sheet)S.sheet.photoError=problem;requestAnimationFrame(render);return;}
   let preview;try{preview=URL.createObjectURL(f);}catch(_){if(id==='portrait')S.portraitError=true;else if(S.sheet===draft)draft.photoError=true;requestAnimationFrame(render);return;}
   if(id==='portrait'){S.portraitDraft={file:f,url:preview,name:f.name};S.portraitError=false;requestAnimationFrame(render);void submitPortrait();return;}
@@ -2908,7 +2996,7 @@ document.addEventListener('keydown', ev => {
   if (!S.sheet) return;
   if (ev.key === 'Escape') { act('cancel'); return; }
   if (ev.key !== 'Tab') return;  // keep Tab inside the open sheet
-  trapTab(ev,'[data-sheet] button:not([disabled]), [data-sheet] input:not([disabled]), [data-sheet] select:not([disabled]), [data-sheet] textarea:not([disabled]), [data-sheet] summary');
+  trapTab(ev,'[data-sheet] button:not([disabled]), [data-sheet] input:not([disabled]), [data-sheet] select:not([disabled]), [data-sheet] textarea:not([disabled]), [data-sheet] summary, [data-sheet] a[href]');
 });
 window.addEventListener('beforeunload',ev=>{if((S.sheet&&hasDraft(S.sheet))||Object.values(S.drafts).some(Boolean)){ev.preventDefault();ev.returnValue='';}});
 window.addEventListener('resize',drawCharts);

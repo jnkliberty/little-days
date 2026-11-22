@@ -146,6 +146,7 @@
     // A write result (or a full reload) was applied: every state request that started before it is out of date. Returns the number it takes.
     writeApplied() { writesApplied++; return {seq:++replySeq,writes:writesApplied}; },
     async growth() { return request('/api/growth'); },
+    async photos(offset = 0) { const q = offset ? `?offset=${encodeURIComponent(offset)}` : ''; return request(`/api/photos${q}`); },
     async foods() { return request('/api/foods'); },
     async aiStatus() { return request('/api/ai/status'); },
     async development() { return request('/api/development',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(60000)}); },

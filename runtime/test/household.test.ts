@@ -43,6 +43,19 @@ test('the optional growth chart retains the child and table choice and can be cl
   } finally { store.close(); }
 });
 
+// Plan 2026-11-21, Group 1: each adult can turn the forecast facts off. An older client sends no `forecast` and still saves.
+test('the optional forecast switch saves on or off, refuses other values, and is not required', async () => {
+  const { store, sessions, records } = fixture(), household = createHousehold({ store, sessions, records: records as never });
+  const settings = { lang: 'en', units: 'metric', palette: 'Sorbet', night: false };
+  try {
+    assert.equal(household.savePreference(adult, { ...settings, operationId: op('21'), forecast: 'off' }).status, 'saved');
+    assert.equal((await household.state(adult)).preferences.forecast, 'off');
+    assert.throws(() => household.savePreference(adult, { ...settings, operationId: op('22'), forecast: 'maybe' }), { status: 400 });
+    assert.equal(household.savePreference(adult, { ...settings, operationId: op('23') }).status, 'saved');
+    assert.equal((await household.state(adult)).preferences.forecast, undefined);
+  } finally { store.close(); }
+});
+
 test('duty and reminders require known adults, deduplicate, and limit opt-in to self', async () => {
   const { store, sessions, records } = fixture();
   store.putSetting('app', 'people', ['Sage', 'Rowan']);

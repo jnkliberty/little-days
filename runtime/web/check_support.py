@@ -128,6 +128,7 @@ def open_app(browser, base, width, height, at, night_rules=False, lang="en", the
     page.route("**/api/session/passcode", lambda r: r.fulfill(json={"people": ["Rowan", "Sage"]}))
     page.route(re.compile(r"/api/state(\?.*)?$"), lambda r: r.fulfill(json=state))
     page.route("**/api/growth", lambda r: r.fulfill(json={"entries": [], "unavailable": []}))
+    page.route(re.compile(r"/api/photos(\?.*)?$"), lambda r: r.fulfill(json={"photos": [], "nextOffset": None}) if r.request.method == "GET" else r.fallback())
     if development:  # daily guidance comes from the server; a page that wants a source fact must serve it
         def guidance(route):  # like the server, send no cards for a child with no birth date
             batch = development_batch(at.astimezone(MX).date().isoformat())

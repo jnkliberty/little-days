@@ -11,6 +11,7 @@ import type { SessionService } from './session.ts';
 const LIMIT = 25 * 1024 * 1024;
 const PAGE_SIZE = 100;
 const PAGE_CAP = 100;
+const LIST_PAGES_PER_CALL = 5;
 type PhotoInput = Awaited<ReturnType<typeof photoForm>>;
 type PhotoConfig = {id: number; slug: string};
 type Image = {bytes: Buffer; mime: string; digest: string};
@@ -362,5 +363,55 @@ export function createPhotos({store, sessions, baseUrl, fetchImpl = fetch}: {sto
     res.end(unchanged ? undefined : image.bytes);
   }
 
-  return {upload, send, operation};
+  function parseOffset(raw: string | null | undefined): number {
+    if (raw == null || raw === '') return 0;
+    if (!/^\d+$/.test(raw)) throw new HttpError(400, 'Use a valid photo offset.');
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < 0) throw new HttpError(400, 'Use a valid photo offset.');
+    return value;
+  }
+
+  type PhotoListItem = {id: string; time: string; url: string; title: string; photoName: string};
+
+  function toPhotoListItem(row: Record<string, unknown>, childIdValue: number): PhotoListItem | null {
+    if (!Number.isSafeInteger(row.id) || childId(row) !== childIdValue) return null;
+    if (typeof row.image !== 'string' || !row.image.trim()) return null;
+    if (typeof row.time !== 'string' || !Number.isFinite(Date.parse(row.time))) return null;
+    const meta = object(store.getEventMetadata('notes', String(row.id))?.metadata) || {};
+    if (meta.appType === 'visit') return null;
+    const id = `notes:${row.id}`;
+    return {
+      id,
+      time: row.time,
+      url: `/api/photos/${encodeURIComponent(id)}`,
+      title: typeof meta.title === 'string' ? meta.title : '',
+      photoName: typeof meta.photoName === 'string' ? meta.photoName : '',
+    };
+  }
+
+  async function list(session: Session, offsetParam?: string | null): Promise<{photos: PhotoListItem[]; nextOffset: number | null}> {
+    requirePermission(session, 'core.view_note');
+    const offset = parseOffset(offsetParam);
+    const savedChild = object(store.getSetting('app', 'child'));
+    if (!savedChild || !Number.isSafeInteger(savedChild.id)) return {photos: [], nextOffset: null};
+    const childIdValue = Number(savedChild.id);
+    const photos: PhotoListItem[] = [];
+    let cursor = offset, nextOffset: number | null = null;
+    for (let page = 0; page < LIST_PAGES_PER_CALL; page++) {
+      const response = await sessions.request(session.sessionId, {resource: 'notes', method: 'GET', query: {child: childIdValue, limit: PAGE_SIZE, offset: cursor}});
+      const batch = rowList(response);
+      if (!batch) throw new HttpError(502, 'Baby Buddy returned an invalid note list.');
+      for (const row of batch) {
+        const item = toPhotoListItem(row, childIdValue);
+        if (item) photos.push(item);
+      }
+      cursor += batch.length;
+      const total = typeof object(response)?.count === 'number' ? Number(object(response)!.count) : null;
+      if (batch.length < PAGE_SIZE || (total !== null && cursor >= total)) { nextOffset = null; break; }
+      nextOffset = cursor;
+    }
+    return {photos, nextOffset};
+  }
+
+  return {upload, send, list, operation};
 }

@@ -186,24 +186,24 @@ globalThis.LittleDaysTrends = (() => {
     };
   }
 
-  function firstOffset(entries, today, birthDate, current, activeSleep, activeFeed) {
+  function firstOffset(entries, today, birthDate, current, activeSleep, activeFeed, windowDays = WINDOW) {
     const birth = (Date.parse(birthDate) - Date.parse(today)) / 86400000;
-    if (!Number.isFinite(birth)) return current - WINDOW;
+    if (!Number.isFinite(birth)) return current - windowDays;
     const times = [...(entries || []).map(entry => entry?.t), activeSleep?.t0, activeFeed?.t0];
     const early = times.some(t => t >= birth * DAY && t < startOf(birth));
-    return Math.min(current, Math.max(current - WINDOW, birth - (early ? 1 : 0)));
+    return Math.min(current, Math.max(current - windowDays, birth - (early ? 1 : 0)));
   }
 
-  function rows(entries, today, activeSleep = null, activeFeed = null, now = DAY_START, birthDate = null) {
-    const current = offsetOf(now);
-    const first = firstOffset(entries, today, birthDate, current, activeSleep, activeFeed);
+  function rows(entries, today, activeSleep = null, activeFeed = null, now = DAY_START, birthDate = null, windowDays = WINDOW, endOffset = null) {
+    const current = Number.isInteger(endOffset) ? endOffset : offsetOf(now);
+    const first = firstOffset(entries, today, birthDate, current, activeSleep, activeFeed, windowDays);
     const days = collect(entries, Array.from({length: current - first + 1}, (_, i) => first + i), activeSleep, activeFeed);
     for (const day of days) day.date = shiftDate(today, day.offset);
     return {days: days.slice(0, -1), today: days.at(-1)};
   }
 
-  function summarize(entries, today, activeSleep = null, activeFeed = null, now = DAY_START, birthDate = null) {
-    const {days: full} = rows(entries, today, activeSleep, activeFeed, now, birthDate);
+  function summarize(entries, today, activeSleep = null, activeFeed = null, now = DAY_START, birthDate = null, windowDays = WINDOW, endOffset = null) {
+    const {days: full} = rows(entries, today, activeSleep, activeFeed, now, birthDate, windowDays, endOffset);
     const days = full.filter(day => !birthDate || day.date >= birthDate);
     const series = key => metric(days, key);
     return {
@@ -211,8 +211,8 @@ globalThis.LittleDaysTrends = (() => {
       loggedDays: days.filter(day => day.logged).length,
       metrics: {
         feeds: series('feedCount'), wet: series('wet'), dirty: series('dirty'),
-        sleepMin: series('sleepMin'), longestSleep: series('longestSleep'),
-        bottleMl: series('bottleMl'), pumpMl: series('pumpMl'),
+        sleepMin: series('sleepMin'), nightMin: series('nightMin'), napMin: series('napMin'),
+        longestSleep: series('longestSleep'), bottleMl: series('bottleMl'), pumpMl: series('pumpMl'),
       },
     };
   }
@@ -229,5 +229,5 @@ globalThis.LittleDaysTrends = (() => {
     return {total: intervals.reduce((sum, minutes) => sum + minutes, 0), longest: Math.max(0, ...intervals), evidence};
   }
 
-  return {summarize, day, rows, totals, sleepWithin, sleepEnd, feedSessionKey, DAY_START, NIGHT_START, WINDOW};
+  return {summarize, day, rows, totals, sleepWithin, sleepEnd, feedSessionKey, shiftDate, offsetOf, startOf, DAY_START, NIGHT_START, WINDOW};
 })();

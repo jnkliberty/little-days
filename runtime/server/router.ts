@@ -71,6 +71,7 @@ export function createRouter({store, records, timers, photos, household, care, a
       return;
     }
     if (path === '/api/child/portrait' && method === 'GET') return photos.send(session, res);
+    if (path === '/api/photos' && method === 'GET') return json(res, 200, await photos.list(session, url.searchParams.get('offset')));
     const photo = /^\/api\/photos\/([^/]+)$/.exec(path);
     if (photo && method === 'GET') return photos.send(session, res, decodeURIComponent(photo[1]));
     if ((path === '/api/photos' && method === 'POST') || (path === '/api/child/portrait' && method === 'PUT')) {

@@ -68,6 +68,9 @@ def flow_add_and_save(browser, base, lang):
     posts = []
 
     def photo(route):
+        if route.request.method != 'POST':
+            route.fallback()
+            return
         posts.append((route.request.method, route.request.headers.get('content-type', ''), route.request.post_data_buffer or b''))
         body = route.request.post_data_buffer or b''
         op = body.split(b'name="operationId"\r\n\r\n')[1].split(b'\r\n')[0].decode()
@@ -212,6 +215,9 @@ def posted_parts(buffer, content_type):
 
 def capture(page, pattern, posts):
     def handler(route):
+        if route.request.method == 'GET':
+            route.fallback()
+            return
         body = route.request.post_data_buffer or b''
         posts.append((route.request.method, route.request.headers.get('content-type', ''), body))
         op = posted_parts(body, route.request.headers['content-type'])['operationId'][1].decode()

@@ -20,6 +20,10 @@ globalThis.LittleDaysCharts = (() => {
     const L = 40, R = 56, top = 8, ph = 152, n = rows.length, band = (w - L - R) / n, bw = Math.min(20, band - 8);
     const px = ph / panel.max, h = top + ph + 32, colX = i => L + i * band + 2, base = top + ph;
     let out = `<rect class="now" x="${colX(n - 1)}" y="${top - 4}" width="${band - 4}" height="${ph + 4}" rx="8"/>`;
+    // panel.band = {low, high, open}: her typical range behind the bars. An open band ("at least") runs from low to the top, with one edge line at low.
+    const nb = panel.band, yLow = nb && base - nb.low * px;
+    if (nb) out += nb.open ? `<rect class="nr-band open" x="${L}" y="${top}" width="${w - L - R}" height="${yLow - top}"/><line class="nr-edge" x1="${L}" x2="${w - R}" y1="${yLow}" y2="${yLow}"/>`
+      : `<rect class="nr-band" x="${L}" y="${base - nb.high * px}" width="${w - L - R}" height="${(nb.high - nb.low) * px}"/>`;
     const names = [];
     for (const t of panel.ticks) {
       const y = base - t * px;
@@ -185,5 +189,52 @@ globalThis.LittleDaysCharts = (() => {
     return svg(w, H, label, out);
   }
 
-  return {columns, rhythm, growth, scale, mini, dayline, daylineLabels, labelGap, DAYLINE_PAD, week, growthLine};
+  // Completed-period stacked column chart for Reports (7, 14, or 30 full days; solid bars, positive widths, direct series names).
+  function bandRect(band, L, R, w, top, base, px) {
+    if (!band) return '';
+    const yLow = base - band.low * px;
+    return band.open
+      ? `<rect class="nr-band open" x="${L}" y="${top}" width="${w - L - R}" height="${yLow - top}"/><line class="nr-edge" x1="${L}" x2="${w - R}" y1="${yLow}" y2="${yLow}"/>`
+      : `<rect class="nr-band" x="${L}" y="${base - band.high * px}" width="${w - L - R}" height="${(band.high - band.low) * px}"/>`;
+  }
+
+  function stackedBar(r, x, bw, base, px, n, panel, isLast, names) {
+    let y = base, out = '';
+    r.v.forEach((v, k) => {
+      if (!v) return;
+      const hh = v * px, yT = y - hh, hg = Math.max(2, hh - (y < base ? 2 : 0));
+      const rr = Math.min(n > 14 ? 2 : 6, bw / 2, hg / 2), paint = `fill="${panel.colors[k]}"`;
+      out += r.v.slice(k + 1).some(Boolean)
+        ? `<rect x="${x.toFixed(1)}" y="${yT.toFixed(1)}" width="${bw.toFixed(1)}" height="${hg.toFixed(1)}" ${paint}/>`
+        : `<path d="M${x.toFixed(1)} ${(yT + hg).toFixed(1)}V${(yT + rr).toFixed(1)}a${rr.toFixed(1)} ${rr.toFixed(1)} 0 0 1 ${rr.toFixed(1)}-${rr.toFixed(1)}h${Math.max(0, bw - 2 * rr).toFixed(1)}a${rr.toFixed(1)} ${rr.toFixed(1)} 0 0 1 ${rr.toFixed(1)} ${rr.toFixed(1)}V${(yT + hg).toFixed(1)}Z" ${paint}/>`;
+      if (isLast && panel.names[k]) names.push([panel.names[k], yT + hg / 2 + 5]);
+      y = yT;
+    });
+    return out;
+  }
+
+  function reportColumns(w, label, rows, panel) {
+    const L = 40, R = 60, top = 8, ph = 152, n = Math.max(1, rows.length), band = (w - L - R) / n;
+    const gap = n > 14 ? 2 : n > 7 ? 4 : 8, bw = Math.max(4, Math.min(20, band - gap));
+    const px = ph / panel.max, h = top + ph + 32, base = top + ph, names = [];
+    let out = bandRect(panel.band, L, R, w, top, base, px);
+    for (const tk of panel.ticks) {
+      const y = base - tk * px;
+      out += `<line class="grid" x1="${L}" x2="${w - R}" y1="${y}" y2="${y}"/><text x="${L - 8}" y="${y + 5}" text-anchor="end">${(panel.tick || String)(tk)}</text>`;
+    }
+    rows.forEach((r, i) => {
+      out += stackedBar(r, L + i * band + (band - bw) / 2, bw, base, px, n, panel, i === n - 1, names);
+      if (r.x) {
+        const anchor = r.anchor || 'middle', tx = anchor === 'start' ? L : anchor === 'end' ? w - R : L + (i + 0.5) * band;
+        out += `<text${i === n - 1 ? ' class="val"' : ''} x="${tx.toFixed(1)}" y="${h - 8}" text-anchor="${anchor}">${r.x}</text>`;
+      }
+    });
+    names.forEach((m, k) => {
+      if (k && names[k - 1][1] - m[1] < 16) m[1] = names[k - 1][1] - 16;
+      out += `<text class="name" x="${w - R + 6}" y="${m[1].toFixed(1)}">${m[0]}</text>`;
+    });
+    return svg(w, h, label, out);
+  }
+
+  return {columns, reportColumns, rhythm, growth, scale, mini, dayline, daylineLabels, labelGap, DAYLINE_PAD, week, growthLine};
 })();
