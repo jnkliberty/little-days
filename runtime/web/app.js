@@ -835,6 +835,8 @@ function endFactSwipe(ev){
   if(!start.several){resetFactDrag(start);redrawAfterFactPress();return;}
   moveFact(direction,start);
 }
+// iPhone Safari shows :active (the press) only on a page that listens for touches.
+document.addEventListener('touchstart',()=>{},{passive:true});
 document.addEventListener('pointerdown',ev=>{
   factSwiped=false;
   const card=ev.target.closest?.('.insight');
@@ -895,7 +897,7 @@ function syncFactCarousel(){
   }
 }
 for(const event of ['pointerover','pointerout','focusin','focusout','visibilitychange'])document.addEventListener(event,()=>queueMicrotask(syncFactCarousel));
-factMotion.addEventListener('change',()=>{document.getAnimations().filter(a=>a.id==='ui-enter').forEach(a=>a.cancel());if(S.auth==='ready'&&S.tab==='home')render();syncFactCarousel();});
+factMotion.addEventListener('change',()=>{document.getAnimations().filter(a=>a.id==='ui-enter'||a.id==='ui-scrim').forEach(a=>a.cancel());if(S.auth==='ready'&&S.tab==='home')render();syncFactCarousel();});
 function factPool(){
   if(S.homeAccessBlocked)return [];
   const today=todayISO(),nowMinutes=nowExactM(),lang=S.lang,units=unitsOf();
@@ -2967,9 +2969,11 @@ function render() {
   if(hadApp&&!keyboardInput&&!factMotion.matches&&!document.hidden){
     for(const el of document.querySelectorAll('.bsheet,.overlay .confirm,.toast')){
       if(previousEntrances.has(el.getAttribute('key')))continue;
-      const toast=el.matches('.toast'),base=toast?'translateX(-50%) ':'';
-      const animation=el.animate([{opacity:0,transform:`${base}translateY(8px)${toast?'':' scale(.97)'}`},{opacity:1,transform:`${base}translateY(0)${toast?'':' scale(1)'}`}],{duration:toast?140:180,easing:'cubic-bezier(0.23, 1, 0.32, 1)'});
+      // Sheets sit on the bottom edge: they rise 8 px with no scale (a scale lifts the edge off the screen), and the scrim fades in with them.
+      const toast=el.matches('.toast'),base=toast?'translateX(-50%) ':'',timing={duration:toast?140:180,easing:'cubic-bezier(0.23, 1, 0.32, 1)'};
+      const animation=el.animate(toast?[{opacity:0,transform:`${base}translateY(8px)`},{opacity:1,transform:`${base}translateY(0)`}]:[{transform:'translateY(8px)'},{transform:'translateY(0)'}],timing);
       animation.id='ui-enter';
+      if(!toast)el.parentElement.animate([{opacity:0},{opacity:1}],timing).id='ui-scrim';
     }
   }
 }
