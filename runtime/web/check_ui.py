@@ -842,7 +842,7 @@ def audit_forms_look(browser, base):
 def audit_more_look(browser, base):
     """Changed (R4, binding notes): "Log something else" is a full screen with the title bar and one card of nav rows, each with an icon block and a chevron. No record row is dropped; Care connection moved to Settings."""
     at = datetime.fromisoformat("2026-11-10T12:00:00-06:00")
-    rows_en = ["Medicine", "Temperature", "Note", "Appointment", "Doctor visit", "Growth", "Handoff note", "Solids", "Tummy time", "Bath", "Milestone"]
+    rows_en = ["Medicine", "Temperature", "Note", "Appointment", "Doctor visit", "Growth", "Handoff note", "Solids", "Tummy time", "Bath", "Milestone", "Reminder"]
     for lang in ("en", "es"):
         for width in (390, 360):
             page = open_app(browser, base, width, 844, at, lang=lang, theme="off")
@@ -852,9 +852,9 @@ def audit_more_look(browser, base):
                 return {full: root.classList.contains('formscreen') && Math.round(r(root).width) === innerWidth, bar: !!root.querySelector('header.bar h1'), cards: cards.length, rows: rows.length, icons: rows.filter(x => x.querySelector('svg.ico')).length, chev: rows.filter(x => x.querySelector('svg.glyph')).length,
                     labels: rows.map(x => x.textContent.trim()), tall: rows.every(x => r(x).height >= 48), sideways: root.scrollWidth > root.clientWidth}; }""")
             check(f"{lang} {width} More: a full screen with a title bar and one card: {m['full']} {m['bar']} {m['cards']}", m["full"] and m["bar"] and m["cards"] == 1)
-            check(f"{lang} {width} More: all 11 rows stay, each with an icon block and a chevron glyph: {m['rows']} {m['icons']} {m['chev']}", m["rows"] == 11 and m["icons"] == 11 and m["chev"] == 11 and m["tall"] and not m["sideways"])  # D4: no Reminder row
+            check(f"{lang} {width} More: all 12 rows stay, each with an icon block and a chevron glyph: {m['rows']} {m['icons']} {m['chev']}", m["rows"] == 12 and m["icons"] == 12 and m["chev"] == 12 and m["tall"] and not m["sideways"])
             if lang == "en":
-                check(f"More: no record row is dropped or renamed, and Reminder is absent (D4): {m['labels']}", sorted(m["labels"]) == sorted(rows_en) and "Reminder" not in m["labels"])
+                check(f"More: no record row is dropped or renamed, and Reminder is present: {m['labels']}", sorted(m["labels"]) == sorted(rows_en) and "Reminder" in m["labels"])
             if width == 390:
                 page.screenshot(path=str(Path(os.environ.get("LOOK_SHOTS", "/tmp")) / f"more-{lang}.png"))
             page.context.close()

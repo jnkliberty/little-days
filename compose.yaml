@@ -49,6 +49,8 @@ services:
       LITTLE_DAYS_AI_MODEL: ${LITTLE_DAYS_AI_MODEL:-}
       LITTLE_DAYS_AI_API_KEY: ${LITTLE_DAYS_AI_API_KEY:-}
       LITTLE_DAYS_ANTHROPIC_API_KEY: ${LITTLE_DAYS_ANTHROPIC_API_KEY:-}
+      # Optional web push alerts contact (mailto: or public https: URL) required by Apple APNs / VAPID.
+      LITTLE_DAYS_PUSH_CONTACT: ${LITTLE_DAYS_PUSH_CONTACT:-}
     volumes:
       - ./data/gateway:/data
       - type: bind

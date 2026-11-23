@@ -115,7 +115,7 @@ function statusOf(op: Operation, extra: Record<string, unknown> = {}) {
 
 type StartStep = { created: unknown } | { result: Record<string, unknown> };
 
-export function createTimers({ store, sessions, records, now = Date.now, log = line => console.error(line) }: { store: Store; sessions: Sessions; records: Records; now?: () => number; log?: (line: string) => void }) {
+export function createTimers({ store, sessions, records, now = Date.now, log = line => console.error(line), onTakeOverSaved }: { store: Store; sessions: Sessions; records: Records; now?: () => number; log?: (line: string) => void; onTakeOverSaved?: (session: Session, operationId: string) => void | Promise<void> }) {
   const inFlight = new Map<string, Promise<unknown>>();
   const logged = new Set<string>();
 
@@ -203,7 +203,10 @@ export function createTimers({ store, sessions, records, now = Date.now, log = l
       if (op.state === 'finishing') { logOnce(`finishing:${op.id}`, `A timer stop (${op.id}) keeps its lock: its save result is not known.`); continue; }
       if (typeof metadata.deadline !== 'number' || now() - metadata.deadline < TAKEOVER_AFTER || !hasDeletePermission(session)) continue;
       advanceStop(session, op).then(
-        result => { if (result.status !== 'saved') log(`A timer stop takeover (${op.id}) ended as ${String(result.status)}.`); },
+        result => {
+          if (result.status === 'saved') void Promise.resolve(onTakeOverSaved?.(session, op.id)).catch(() => {});
+          else log(`A timer stop takeover (${op.id}) ended as ${String(result.status)}.`);
+        },
         error => log(`A timer stop takeover (${op.id}) failed: ${error instanceof Error ? error.name : 'Error'}.`),
       );
     }

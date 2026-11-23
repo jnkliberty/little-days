@@ -104,6 +104,16 @@ Copy `caddy-root.crt` first (see [HTTPS](#https)). Use the sample only on a thro
 
 Tap **Crying** on Home to compare feed, sleep and diaper gaps against recent days, open a care form in one tap, and log later what stopped the cry. Optional 10-second audio recording stays off until an adult turns it on in Settings. Recorded clips stay on your own computer in `data/`, stop at 400 clips, never leave the install, and can be deleted one by one or cleared together in Settings.
 
+## Phone alerts (optional)
+
+Little Days can send locked-screen web push alerts for saved reminders, medicine next doses, next nap windows, and next feed windows. Alert text uses general words only (no baby name, no medicine name) and is encrypted before leaving your computer. To enable alerts, add a `mailto:` or public `https:` contact address to `.env` and run `docker compose up -d`:
+
+```
+LITTLE_DAYS_PUSH_CONTACT=https://your-site.example/contact
+```
+
+On iPhone (iOS 16.4 or newer), add Little Days to the Home Screen first, open it from the Home Screen, and tap **Turn on alerts** in Settings.
+
 ## Ask AI (on when you add your own key)
 
 AI uses your own API key and your own credits. Until you add a key, the app has no daily development cards and no Chat, and it makes no call to any AI provider. The one exception is an OpenAI-compatible server on the same computer (`localhost`), which needs no key. Add the settings to `.env` and run `docker compose up -d`.

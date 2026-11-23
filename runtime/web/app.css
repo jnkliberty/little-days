@@ -1,9 +1,11 @@
-/* Gallery: one feed accent, neutral cards, system type. Dim follows the install's time zone. */
+/* Gallery: one feed accent, neutral cards, self-hosted Nunito type. Dim follows the install's time zone. */
+/* Metric overrides trim Nunito's extra 1.364em vertical box to 1.20em (matching Helvetica Neue; Latin+ES glyphs span +94.2% to -19.2%) so 1.2 line-height headings and chart labels never overlap or shift on swap. */
+@font-face{font-family:"Nunito";src:url("./vendor/nunito-v1.woff2") format("woff2");font-weight:200 1000;font-style:normal;font-display:swap;ascent-override:95%;descent-override:22%;line-gap-override:3%}
 :root{
   --page:#f0f0f2; --card:#ffffff; --ink:#1f1f23; --mute:#5f5f66; --ring:#e6e6ea; --ring-strong:#5f5f66; --track:#e4e4e8;
   --accent:#7966af; --primary:#2f2e33; --on-ink:#ffffff; --off:var(--card); --off-ink:var(--ink); --yday:var(--mute); --tap:48px;
   --space-tight:4px; --space-label:8px; --space-control:16px; --space-group:24px;
-  --sans:"Helvetica Neue",system-ui,-apple-system,sans-serif;
+  --sans:"Nunito","Helvetica Neue",system-ui,-apple-system,sans-serif;
   --scrim:rgba(31,31,35,.32); --dis:var(--mute); --err:var(--ink);
   /* Color slots from DESIGN.md (look A, approved 2026-11-11). Same names and values as the mockup; design/palette_check.py reads this block.
      One color for each care type. Lilac is for actions only. The five old unused care slots are gone. */
@@ -1075,6 +1077,58 @@ html[data-theme=dim] .charts-page .plot .col.on{stroke:var(--ink)}
 .tl-ctrl.back:disabled .ln{stroke:var(--mute)}
 .tl-skel-stage{width:100%;height:320px;border-radius:16px;background:var(--band)}
 .tl-error-wrap{flex:1;display:grid;align-content:start}
+
+/* Real alerts on the phone (plan 2026-11-21-alerts.md, Group 5; look approved 2026-11-22). Tokens only: no new color. */
+.al-card{display:grid;gap:16px}
+.al-status{display:flex;align-items:center;gap:8px;font-size:16px;line-height:1.4;font-weight:700;color:var(--ink);text-wrap:balance}
+.al-status .glyph{width:20px;height:20px;flex:none}
+.al-status .ln{stroke:var(--ink)}
+.al-copy{font-size:14px;line-height:1.4;color:var(--mute);text-wrap:pretty}
+.al-steps{margin:0;padding-left:24px;display:grid;gap:8px;font-size:16px;line-height:1.4;color:var(--ink)}
+.al-steps li{text-wrap:pretty}
+.al-types{display:grid;gap:16px;padding-top:16px;border-top:1px solid var(--hair)}
+.al-type-row{display:grid;gap:8px;padding-top:16px;border-top:1px solid var(--hair)}
+.al-type-row:first-child{padding-top:0;border-top:0}
+.al-type-row .chip,.clock-row .chip{min-width:64px}
+.al-type-head{display:grid;gap:4px}
+.al-type-head strong{font-size:16px;line-height:1.4;font-weight:700;color:var(--ink)}
+.al-type-head span{font-size:14px;line-height:1.4;color:var(--mute);text-wrap:pretty}
+.al-actions{display:grid;gap:8px}
+.al-secondary{justify-self:start;min-height:48px;padding:0 16px;border-radius:999px;border:2px solid var(--lilac-deep);background:var(--card);color:var(--lilac-deep);font-size:16px;line-height:1.2;font-weight:700;cursor:pointer}
+.al-warn{border-radius:16px;padding:12px 16px;background:var(--track);color:var(--ink);font-size:14px;line-height:1.4;font-weight:700;display:flex;gap:8px;align-items:flex-start}
+.al-warn .glyph{width:20px;height:20px;flex:none}
+.al-warn .ln{stroke:var(--ink)}
+.al-field-hint{font-size:14px;line-height:1.4;color:var(--mute);text-wrap:pretty}
+.al-field-err{font-size:14px;line-height:1.4;font-weight:700;color:var(--ink);padding:8px 12px;border-radius:16px;background:var(--track);display:flex;gap:8px;align-items:center;text-wrap:balance}
+.al-field-err[hidden]{display:none}
+.al-field-err .glyph{width:20px;height:20px;flex:none}
+.al-field-err .ln{stroke:var(--ink)}
+.al-med-next{display:block;font-size:14px;line-height:1.4;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:4px}
+.rem-wrap{display:grid;gap:24px}
+.rem-sec{display:grid;gap:8px}
+.rem-sec>h2{font-size:18px;line-height:1.2;font-weight:700;padding:0 16px;color:var(--ink)}
+.sheet .rem-sec>h2{padding:0}
+.sheet .rem-sec+.rem-sec{padding-top:16px;border-top:1px solid var(--hair)}
+.rem-list{list-style:none;margin:0;padding:0;display:grid}
+.rem-item{display:grid;gap:12px;padding:16px 0;border-top:1px solid var(--hair)}
+.rem-item:first-child{border-top:0;padding-top:0}
+.rem-item:last-child{padding-bottom:0}
+.rem-top{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:12px;align-items:center}
+.rem-title{font-size:16px;line-height:1.4;font-weight:700;color:var(--ink)}
+.rem-when{font-size:14px;line-height:1.4;color:var(--mute);font-variant-numeric:tabular-nums}
+.rem-state{display:inline-flex;align-items:center;gap:4px;font-size:14px;line-height:1.2;font-weight:700;color:var(--mute);white-space:nowrap}
+.rem-state.on{color:var(--ink)}
+.rem-state .glyph{width:16px;height:16px}
+.rem-state .ln{stroke:var(--ink)}
+.clock-row{display:grid;gap:8px}
+.rem-controls{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding-left:52px}
+.rem-controls .textlink{min-height:48px}
+.rem-recipient{font-size:16px;line-height:1.4;font-weight:700;color:var(--ink);padding:12px 16px;border-radius:16px;background:var(--page)}
+.rem-note{font-size:14px;line-height:1.4;color:var(--ink);padding:12px 16px;border-radius:16px;background:var(--page);display:flex;gap:8px;align-items:flex-start}
+.rem-note .glyph{width:20px;height:20px;flex:none}
+.rem-note .ln{stroke:var(--ink)}
+.rem-empty{font-size:16px;line-height:1.4;color:var(--mute)}
+.rem-foot{display:grid;gap:8px}
 
 @media print{
   html[data-theme=dim]{

@@ -909,6 +909,9 @@ export function createRecords({ store, sessions, now = () => new Date() }: { sto
     const metadata = store.getEventMetadata(parsed.resource, parsed.id), by = loggedBy(event, metadata?.adult || session.adult), requestBody = { id, event, write, before: currentRow, by };
     // Editing one part must not split a feeding session in the counts.
     if (parsed.resource === 'feedings' && isRecord(metadata?.metadata) && metadata.metadata.sessionId) write.metadata.sessionId = metadata.metadata.sessionId;
+    if (event.type === 'med' && !Object.hasOwn(event, 'next') && isRecord(metadata?.metadata) && metadata.metadata.nextDoseHours != null) {
+      write.metadata.nextDoseHours = metadata.metadata.nextDoseHours;
+    }
     if (event.type === 'growth' && isRecord(metadata?.metadata) && metadata.metadata.growthPair) {
       write.metadata.growthPair = metadata.metadata.growthPair;
       write.metadata.recumbent = metadata.metadata.recumbent === true;

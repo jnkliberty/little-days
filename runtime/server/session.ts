@@ -47,7 +47,7 @@ function equalDigest(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = DEFAULT_TTL_MS }: { store: Store; babyBuddy: BabyBuddyClient; accounts?: {username: string; password: string}[]; ttlMs?: number }) {
+export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = DEFAULT_TTL_MS, now = Date.now }: { store: Store; babyBuddy: BabyBuddyClient; accounts?: {username: string; password: string}[]; ttlMs?: number; now?: () => number }) {
   if (!Number.isSafeInteger(ttlMs) || ttlMs < 60_000) throw new Error('Invalid session lifetime');
   // Memory only, keyed by the session ID hash, so a restart loses both. The store keeps only hashes.
   const upstreams = new Map<string, Upstream>();
@@ -218,6 +218,42 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
     throw new Error('Baby Buddy identity check failed');
   }
 
+  async function requestForActiveUser(userId: number, req: BabyBuddyRequest, nowMs = now()): Promise<unknown> {
+    const live = store.listLiveSessionsForUser(userId, nowMs);
+    const activeRow = live.find(row => accounts.some(account => account.username === row.adult));
+    if (!activeRow) throw Object.assign(new Error('Session expired'), { status: 401 });
+    const account = accounts.find(item => item.username === activeRow.adult)!;
+    const cached = live.map(row => ({ key: row.idHash, entry: upstreams.get(row.idHash) }))
+      .find(item => item.entry && nowMs - item.entry.usedAt < UPSTREAM_IDLE_MS);
+    const getUpstream = async (allowCached: boolean): Promise<{ key: string; upstream: BabyBuddySession }> => {
+      if (allowCached && cached?.entry) {
+        cached.entry.usedAt = nowMs;
+        return { key: cached.key, upstream: cached.entry.session };
+      }
+      let upstream: BabyBuddySession;
+      try { upstream = await babyBuddy.login(account.username, account.password); }
+      catch (error) {
+        const authErr = error as { rejected?: boolean; locked?: boolean };
+        if (authErr?.rejected || authErr?.locked) throw Object.assign(new Error('Baby Buddy login failed'), { status: 401 });
+        throw error;
+      }
+      if (upstream.userId !== userId || upstream.username !== account.username) {
+        await babyBuddy.logout(upstream).catch(() => {});
+        throw Object.assign(new Error('Baby Buddy identity changed'), { status: 401 });
+      }
+      upstreams.set(activeRow.idHash, { session: upstream, usedAt: nowMs });
+      return { key: activeRow.idHash, upstream };
+    };
+    const first = await getUpstream(true);
+    try { return await babyBuddy.request(first.upstream, req); }
+    catch (error) {
+      if ((error as { status?: number })?.status !== 403 || !(await loginEnded(first.upstream))) throw error;
+      if (upstreams.get(first.key)?.session === first.upstream) upstreams.delete(first.key);
+      const retry = await getUpstream(false);
+      return babyBuddy.request(retry.upstream, req);
+    }
+  }
+
   async function logout(sessionId: string, csrfToken: string): Promise<void> {
     requireCsrf(sessionId, csrfToken);
     const current = forget(hashSecret(sessionId));
@@ -231,7 +267,7 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
     return saved && typeof saved === 'object' && !Array.isArray(saved) ? Object.fromEntries(Object.entries(saved).filter(([name]) => configuredPeople.includes(name))) as Record<string, string | { en: string; es?: string }> : {};
   }
 
-  return { issueLoginCsrf, login, select, passcodeSet: () => passcodeIsSet(store), checkPasscode: (passcode: unknown) => verifyPasscode(store, passcode), people: () => [...configuredPeople], labels, get, renew, csrfFor, request, identity, identityForUser, requireCsrf, logout };
+  return { issueLoginCsrf, login, select, passcodeSet: () => passcodeIsSet(store), checkPasscode: (passcode: unknown) => verifyPasscode(store, passcode), people: () => [...configuredPeople], labels, get, renew, csrfFor, request, requestForActiveUser, identity, identityForUser, requireCsrf, logout };
 }
 
 export type SessionService = ReturnType<typeof createSessionService>;

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { addCryColumns, createCryStore } from './cries-store.ts';
+import { createAlertStore, initAlertTables } from './alerts-store.ts';
 
 export type SessionInput = {
   sessionId: string;
@@ -39,6 +40,39 @@ type MetadataInput = { resource: string; babyBuddyId: string; adult: string; met
 type AppEventInput = { id: string; adult: string; kind: string; occurredAt: string; details: unknown };
 type AppEvent = AppEventInput;
 export type CareAction = { revision: string; userId: number; operationId: string; action: 'confirm' | 'revoke' | 'opt_in'; confirmationId: string | null; value: unknown; createdAt: string };
+export type PushSubscriptionRecord = {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  sessionIdHash: string;
+  adult: string;
+  babyBuddyUserId: number;
+  sessionExpiresAt: number;
+  createdAt: number;
+  updatedAt: number;
+};
+export type AlertType = 'reminder' | 'medicine' | 'nap' | 'feed';
+export type AlertDue = {
+  eventId: string;
+  scheduleId: string;
+  type: AlertType;
+  dueAt: number;
+  expiresAt: number;
+  recipient: number | null;
+  nameKey: string | null;
+};
+export type AlertDelivery = {
+  eventId: string;
+  scheduleId: string;
+  babyBuddyUserId: number;
+  state: 'retry' | 'sent';
+  attempts: number;
+  nextRetryAt: number;
+  endpoint: string | null;
+  sessionIdHash: string | null;
+  bindingUpdatedAt: number | null;
+  updatedAt: number;
+};
 
 export function hashSecret(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -146,6 +180,7 @@ export function openStore(path: string) {
     db.exec("UPDATE operations SET babybuddy_ids_json = json_array(babybuddy_id) WHERE babybuddy_id IS NOT NULL");
   }
   addCryColumns(db);
+  initAlertTables(db);
 
   function decodeOperation(row: Record<string, unknown> | undefined): Operation | null {
     if (!row) return null;
@@ -161,6 +196,7 @@ export function openStore(path: string) {
 
   return {
     cries: createCryStore(db),
+    ...createAlertStore(db),
     createSession(input: SessionInput): void {
       db.prepare('INSERT INTO sessions (id_hash, csrf_hash, adult, babybuddy_user_id, expires_at) VALUES (?, ?, ?, ?, ?)')
         .run(hashSecret(input.sessionId), hashSecret(input.csrfToken), input.adult, input.babyBuddyUserId, input.expiresAt);

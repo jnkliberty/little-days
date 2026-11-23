@@ -8,11 +8,12 @@ import type { createPhotos } from './photos.ts';
 import type { createHousehold } from './household.ts';
 import type { createCare } from './care.ts';
 import type { createAI } from './ai.ts';
+import type { AlertService } from './alerts.ts';
 import { createCries } from './cries.ts';
 
-type Services = {store: Store; records: ReturnType<typeof createRecords>; timers: ReturnType<typeof createTimers>; photos: ReturnType<typeof createPhotos>; household: ReturnType<typeof createHousehold>; care: ReturnType<typeof createCare>; ai?: ReturnType<typeof createAI>; cries?: ReturnType<typeof createCries>};
+type Services = {store: Store; records: ReturnType<typeof createRecords>; timers: ReturnType<typeof createTimers>; photos: ReturnType<typeof createPhotos>; household: ReturnType<typeof createHousehold>; care: ReturnType<typeof createCare>; ai?: ReturnType<typeof createAI>; cries?: ReturnType<typeof createCries>; alerts?: AlertService};
 
-export function createRouter({store, records, timers, photos, household, care, ai, cries}: Services) {
+export function createRouter({store, records, timers, photos, household, care, ai, cries, alerts}: Services) {
   // Built on first use, so a test that builds a router with no store still works.
   let cryRoutes = cries;
   async function state(session: Session, url?: URL) {
@@ -26,9 +27,11 @@ export function createRouter({store, records, timers, photos, household, care, a
     });
     return {...base, ...active, pendingOperations};
   }
-  async function result(session: Session, value: Record<string, unknown>, operationId?: unknown) {
+  async function result(session: Session, value: Record<string, unknown>, operationId?: unknown, syncOpId?: string) {
     const envelope = {...value, operationId: value.operationId || value.pendingOperation || operationId};
     if (!['saved', 'cancelled'].includes(String(value.status))) return envelope;
+    const opId = syncOpId ?? (typeof operationId === 'string' ? operationId : undefined);
+    if (alerts && opId) alerts.onWrite(session, opId);
     // A failed refresh must not turn a confirmed write into a fresh write on retry.
     try { return {...envelope, state: await state(session)}; }
     catch { return envelope; }
@@ -37,12 +40,23 @@ export function createRouter({store, records, timers, photos, household, care, a
     const op = store.getOperation(id);
     const sharedChild = op?.resource === 'children';
     if (!op || (op.adult !== session.adult && !sharedChild)) throw new HttpError(404, 'Save not found.');
-    if (op.resource === 'photo' || op.resource === 'portrait') return result(session, await photos.operation(session, id));
+    if (op.resource === 'photo' || op.resource === 'portrait') return result(session, await photos.operation(session, id), undefined, id);
     const value = op.resource === 'timers' ? await timers.operation(session, id) : await records.operation(session, id);
-    return result(session, value, sharedChild ? id : undefined);
+    return result(session, value, sharedChild ? id : undefined, id);
   }
   const handle: DomainHandler = async (req, res, url, session) => {
     const path = url.pathname, method = req.method;
+    if (path === '/api/push/config' && method === 'GET') {
+      return json(res, 200, alerts ? alerts.config(session) : { available: false, vapidPublicKey: null, sessionSubscribed: false, thisSessionSelected: false, adultSubscribed: false, authError: false });
+    }
+    if (path === '/api/push/subscribe' && method === 'POST') {
+      if (!alerts) throw new HttpError(503, 'Alerts are not available on this server.');
+      return json(res, 200, await alerts.subscribe(session, await jsonBody(req)));
+    }
+    if (path === '/api/push/unsubscribe' && method === 'POST') {
+      if (!alerts) throw new HttpError(503, 'Alerts are not available on this server.');
+      return json(res, 200, alerts.unsubscribe(session, await jsonBody(req)));
+    }
     if (path === '/api/care-passages' || path === '/api/cries' || path.startsWith('/api/cries/')) return (cryRoutes ??= createCries({store})).handle(req, res, url, session);
     if (path === '/api/development' && method === 'POST') {
       const input = await jsonBody(req);
@@ -98,6 +112,7 @@ export function createRouter({store, records, timers, photos, household, care, a
     if (path === '/api/reminders' && method === 'POST') return household.saveReminder(session, data);
     const reminder = /^\/api\/reminders\/([^/]+)$/.exec(path);
     if (reminder && method === 'PATCH') return household.saveReminder(session, data, decodeURIComponent(reminder[1]));
+    if (reminder && method === 'DELETE') return household.deleteReminder(session, data, decodeURIComponent(reminder[1]));
     const event = /^\/api\/events\/([^/]+)$/.exec(path);
     const split = /^\/api\/events\/([^/]+)\/split$/.exec(path);
     if (split && method === 'POST') return records.splitEvent(session, decodeURIComponent(split[1]), data as any);

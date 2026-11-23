@@ -99,10 +99,10 @@ def capture_all_sheets(page, language):
     for act, name in [("open-med", "medicine"), ("open-temp", "temperature"), ("open-note", "note"), ("open-growth", "growth"), ("open-handoff", "handoff")]:
         page.locator('[data-act="open-more"]').click()
         opened(f'[data-act="{act}"]', name)
-    # D4: reminders are stored but never delivered, so More has no Reminder row. The form code stays and still opens through act().
+    # Group 5: Reminder is back in More with live alerts and upcoming reminders list.
     page.locator('[data-act="open-more"]').click()
-    check(f"more-{language} has no reminder row (D4)", page.locator('[data-act="open-reminder"]').count() == 0)
-    page.evaluate("act('open-reminder')")
+    check(f"more-{language} has reminder row", page.locator('[data-act="open-reminder"]').count() == 1)
+    page.locator('[data-act="open-reminder"]').click()
     capture_sheet(page, f"reminder-{language}")
     dismiss()
     for what, name in [("solids", "solids"), ("tummy", "tummy"), ("bath", "bath"), ("mile", "moment")]:

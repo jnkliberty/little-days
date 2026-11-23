@@ -220,13 +220,13 @@ def audit_care_hours(browser, base):
 
 
 def audit_reminders(browser, base):
-    """Failure case: the reminder form starts with a person named in the code, and Reminder is still offered although none is ever delivered."""
+    """Failure case: the reminder form starts with a wrong person or Reminder is missing from More."""
     for me in ("Sam", "Alex"):
         page = open_page(browser, base, me=me)
         page.locator("[data-act='open-more']").click()
         page.locator("[data-sheet]").wait_for()
-        check(f"{me}: the More list has no reminder row", page.locator("[data-act='open-reminder']").count() == 0)
-        page.evaluate("act('open-reminder')")
+        check(f"{me}: the More list has the reminder row", page.locator("[data-act='open-reminder']").count() == 1)
+        page.locator("[data-act='open-reminder']").click()
         got = page.evaluate("S.sheet && S.sheet.recipient")
         check(f"{me}: a new reminder starts with the signed-in adult ({got!r})", got == me)
         done(page)

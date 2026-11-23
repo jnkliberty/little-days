@@ -169,12 +169,23 @@ function mapDiaper({ event, childId, now }: EventContext): MappedEvent {
     return { writes: [write('changes', body, { appType: 'diaper', texture: event.tex || null, color: color === 'pale' ? 'pale' : null })] };
 }
 
+export function validNextDoseHours(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const out = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(out) && out >= 0.1 && out <= 168 ? out : null;
+}
+
 function mapMedication({ event, childId, now }: EventContext): MappedEvent {
     const dose = number(event.dose, 'dose');
     if (!dose || typeof event.name !== 'string' || !event.name.trim() || !MED_UNITS.has(String(event.unit))) throw new HttpError(400, 'Enter a medicine, dose, and supported unit.');
-    const body: Record<string, unknown> = { child: childId, name: event.name.trim().slice(0, 255), dosage: dose, dosage_unit: event.unit, time: eventInstant(event, now).toISOString(), notes: notes(event.note) };
-    if (event.next != null && event.next !== '') body.next_dose_interval = number(event.next, 'dose interval');
-    return { writes: [write('medication', body, { appType: 'med' })] };
+    const nextProvided = event.next != null && event.next !== '';
+    const nextHours = nextProvided ? validNextDoseHours(event.next) : null;
+    if (nextProvided && nextHours == null) throw new HttpError(400, 'Enter a next dose time between 0.1 and 168 hours.');
+    const name = event.name.trim().slice(0, 255);
+    const doseTimeISO = eventInstant(event, now).toISOString();
+    const body: Record<string, unknown> = { child: childId, name, dosage: dose, dosage_unit: event.unit, time: doseTimeISO, notes: notes(event.note) };
+    const metadata: Record<string, unknown> = { appType: 'med', nameKey: name.toLocaleLowerCase(), doseTimeISO, ...(nextHours != null ? { nextDoseHours: nextHours } : {}) };
+    return { writes: [write('medication', body, metadata)] };
 }
 
 function mapTemperature({ event, childId, now, units }: EventContext): MappedEvent {
@@ -325,8 +336,16 @@ function mapDiaperRecord({ base, row, meta }: RecordContext): Record<string, unk
   return { ...base, type: 'diaper', kind, col: meta.color === 'pale' ? 'pale' : row.color ?? null, tex: meta.texture ?? null };
 }
 
-function mapMedicationRecord({ base, row }: RecordContext): Record<string, unknown> {
-  return { ...base, type: 'med', name: row.name, dose: row.dosage, unit: row.dosage_unit };
+function mapMedicationRecord({ base, row, meta }: RecordContext): Record<string, unknown> {
+  return {
+    ...base,
+    type: 'med',
+    name: row.name,
+    dose: row.dosage,
+    unit: row.dosage_unit,
+    timeISO: typeof row.time === 'string' ? row.time : null,
+    next: validNextDoseHours(meta.nextDoseHours),
+  };
 }
 
 function mapTemperatureRecord({ base, row, meta }: RecordContext): Record<string, unknown> {

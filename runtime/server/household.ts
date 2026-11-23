@@ -2,6 +2,7 @@ import { HttpError } from './http.ts';
 import type { createRecords } from './records.ts';
 import type { SessionService } from './session.ts';
 import type { Store } from './store.ts';
+import { canonical } from './store.ts';
 import { getZone } from './zone.ts';
 
 type Session = { sessionId: string; csrfToken: string; adult: string };
@@ -11,6 +12,7 @@ type Range = { from: string; to: string };
 type Person = string | { name?: string; username?: string; id?: string | number; onDuty?: boolean; on_duty?: boolean };
 const PALETTES = new Set(['Jelly bean', 'Sorbet', 'Spring garden', "Robin's egg"]);
 const EVENT_NAMES = new Set(['feed', 'sleep', 'medicine']);
+const ALERT_KEYS = new Set(['reminder', 'medicine', 'nap', 'feed']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -90,8 +92,17 @@ function csvFor(state: Record<string, unknown>): string {
   return `${lines.join('\r\n')}\r\n`;
 }
 
-export function createHousehold({ store, sessions, records }: { store: Store; sessions: Sessions; records: RecordService }) {
+function stripLegacyDelivery(body: unknown): unknown {
+  if (!isRecord(body) || !Object.hasOwn(body, 'delivery')) return body;
+  const { delivery: _delivery, ...rest } = body;
+  return rest;
+}
+
+export function createHousehold({ store, sessions, records, alertDelivery }: { store: Store; sessions: Sessions; records: RecordService; alertDelivery?: (userId: number, enabled: boolean) => 'push' | 'unavailable' }) {
   function scope(session: Session): string { return `user:${adultId(store, sessions, session)}`; }
+  function deliveryOf(userId: number, enabled: boolean): 'push' | 'unavailable' {
+    return alertDelivery ? alertDelivery(userId, enabled) : 'unavailable';
+  }
 
   function getPreferences(session: Session): Record<string, unknown> {
     const value = store.getSetting(scope(session), 'preferences');
@@ -110,29 +121,49 @@ export function createHousehold({ store, sessions, records }: { store: Store; se
     // The forecast facts switch (plan 2026-11-21, Group 1). Optional: an older client sends none, and none means on.
     const forecast = payload.forecast;
     if (forecast != null && forecast !== 'on' && forecast !== 'off') throw new HttpError(400, 'Choose on or off for the forecast.');
+    let alerts: Record<string, 'on' | 'off'> | undefined;
+    if (payload.alerts !== undefined) {
+      if (!isRecord(payload.alerts)) throw new HttpError(400, 'Choose on or off for each alert type.');
+      alerts = {};
+      for (const [k, v] of Object.entries(payload.alerts)) {
+        if (!ALERT_KEYS.has(k) || (v !== 'on' && v !== 'off')) throw new HttpError(400, 'Choose on or off for each alert type.');
+        alerts[k] = v;
+      }
+    }
     return { lang: payload.lang, units: payload.units, palette: payload.palette, night: payload.night,
-      ...(growthChart ? { growthChart } : {}), ...(forecast ? { forecast } : {}) };
+      ...(growthChart ? { growthChart } : {}), ...(forecast ? { forecast } : {}), ...(alerts ? { alerts } : {}) };
   }
 
   async function state(session: Session, range?: Range) {
     const base = await records.state(session, range) as Record<string, unknown>;
-    const duty = store.getSetting('app', 'duty'), reminders = store.getSetting(scope(session), 'reminders');
+    const userId = adultId(store, sessions, session);
+    const duty = store.getSetting('app', 'duty'), reminders = store.getSetting(`user:${userId}`, 'reminders');
     const people = canonicalPeople(base).map(person => {
       if (typeof person === 'string') return { name: person, onDuty: person === duty };
       const name = personName(person);
       return { ...person, name, onDuty: name === duty };
     });
     const reminderRows = Array.isArray(reminders) ? reminders.filter(isRecord) : [];
-    const mappedReminders = reminderRows.map(item => reminderEntry(item, String(base.today))).filter(isRecord);
+    const mappedReminders = reminderRows
+      .map(item => reminderEntry({ ...item, delivery: deliveryOf(userId, item.enabled === true) }, String(base.today)))
+      .filter(isRecord);
     const entries = Array.isArray(base.entries) ? [...base.entries, ...mappedReminders] : mappedReminders;
-    return { ...base, entries, people, preferences: getPreferences(session), duty: typeof duty === 'string' ? duty : session.adult, dutyNote: store.getSetting('app', 'dutyNote') || '', dutyNoteBy: store.getSetting('app', 'dutyNoteBy') || '', dutyNoteAt: store.getSetting('app', 'dutyNoteAt') || null, dutyHistory: store.listDutyHistory(), reminders: reminderRows };
+    return { ...base, entries, people, preferences: getPreferences(session), duty: typeof duty === 'string' ? duty : session.adult, dutyNote: store.getSetting('app', 'dutyNote') || '', dutyNoteBy: store.getSetting('app', 'dutyNoteBy') || '', dutyNoteAt: store.getSetting('app', 'dutyNoteAt') || null, dutyHistory: store.listDutyHistory(), reminders: mappedReminders };
   }
 
   function savePreference(session: Session, payload: unknown) {
     const value = preferencePayload(payload), id = operationId(isRecord(payload) ? payload.operationId : null), actor = session.adult;
     const begun = sameOperation(store, { id, adult: actor, resource: 'preferences', intent: { action: 'set-preferences' }, requestBody: value, metadata: {} });
     if (!begun.created) return operationResult(begun.operation);
-    try { store.putSetting(scope(session), 'preferences', value); store.finishOperation(id, 'saved', `preferences:${adultId(store, sessions, session)}`); return { status: 'saved', id: `preferences:${adultId(store, sessions, session)}` }; }
+    try {
+      const existing = store.getSetting(scope(session), 'preferences');
+      const toSave = value.alerts === undefined && isRecord(existing) && isRecord(existing.alerts)
+        ? { ...value, alerts: existing.alerts }
+        : value;
+      store.putSetting(scope(session), 'preferences', toSave);
+      store.finishOperation(id, 'saved', `preferences:${adultId(store, sessions, session)}`);
+      return { status: 'saved', id: `preferences:${adultId(store, sessions, session)}` };
+    }
     catch { return { status: 'pending', pendingOperation: id }; }
   }
 
@@ -158,11 +189,12 @@ export function createHousehold({ store, sessions, records }: { store: Store; se
     if (!who || who.length > 100 || !EVENT_NAMES.has(String(base.what)) || typeof base.scheduledAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(base.scheduledAt) || !Number.isFinite(Date.parse(base.scheduledAt)) || typeof base.enabled !== 'boolean') {
       throw new HttpError(400, 'Enter a valid reminder and named recipient.');
     }
-    if (base.enabled && who !== session.adult) throw new HttpError(403, 'Only the signed-in adult can enable reminders for their own account.');
-    return { recipient: who, what: base.what, scheduledAt: new Date(base.scheduledAt).toISOString(), enabled: base.enabled, delivery: 'unavailable' };
+    if (who !== session.adult) throw new HttpError(403, 'Only the signed-in adult can manage reminders for their own account.');
+    return { recipient: who, what: base.what, scheduledAt: new Date(base.scheduledAt).toISOString(), enabled: base.enabled };
   }
 
   function saveReminder(session: Session, payload: unknown, reminderId?: string) {
+    const userId = adultId(store, sessions, session);
     const id = operationId(isRecord(payload) ? payload.operationId : null), value = reminderPayload(session, payload);
     const known = store.getSetting('app', 'people');
     const adults = Array.isArray(known) ? known.map(person => personName(person as Person)) : [session.adult];
@@ -170,14 +202,38 @@ export function createHousehold({ store, sessions, records }: { store: Store; se
     const key = reminderId || `reminder:${id}`;
     if (reminderId && !/^reminder:[0-9a-f-]{36}$/i.test(reminderId)) throw new HttpError(400, 'Enter a valid reminder ID.');
     const input = { id, adult: session.adult, resource: 'reminder', intent: { action: reminderId ? 'update-reminder' : 'create-reminder', target: key }, requestBody: value, metadata: {} };
+    const delivery = deliveryOf(userId, value.enabled === true);
+    const prior = store.getOperation(id);
+    if (prior) {
+      const same = prior.adult === input.adult && prior.resource === input.resource &&
+        canonical(prior.intent) === canonical(input.intent) &&
+        canonical(stripLegacyDelivery(prior.requestBody)) === canonical(input.requestBody) &&
+        canonical(prior.metadata) === canonical(input.metadata);
+      if (!same) throw new HttpError(409, 'This save ID already has different data.');
+      return { ...operationResult(prior), delivery };
+    }
     const begun = sameOperation(store, input);
-    if (!begun.created) return operationResult(begun.operation);
-    const current = store.getSetting(scope(session), 'reminders'), reminders = Array.isArray(current) ? current.filter(isRecord) : [];
+    if (!begun.created) return { ...operationResult(begun.operation), delivery };
+    const current = store.getSetting(`user:${userId}`, 'reminders'), reminders = Array.isArray(current) ? current.filter(isRecord) : [];
     const next = reminderId ? reminders.map(item => item.id === reminderId ? { ...value, id: reminderId } : item) : [...reminders, { ...value, id: key }];
     if (reminderId && !reminders.some(item => item.id === reminderId)) { store.finishOperation(id, 'failed'); throw new HttpError(404, 'Reminder not found.'); }
-    store.putSetting(scope(session), 'reminders', next);
+    store.putSetting(`user:${userId}`, 'reminders', next);
     store.finishOperation(id, 'saved', key);
-    return { status: 'saved', id: key, delivery: 'unavailable' };
+    return { status: 'saved', id: key, delivery };
+  }
+
+  function deleteReminder(session: Session, payload: unknown, reminderId: string) {
+    const userId = adultId(store, sessions, session);
+    const id = operationId(isRecord(payload) ? payload.operationId : null);
+    if (!/^reminder:[0-9a-f-]{36}$/i.test(reminderId)) throw new HttpError(400, 'Enter a valid reminder ID.');
+    const input = { id, adult: session.adult, resource: 'delete:reminder', intent: { action: 'delete-reminder', target: reminderId }, requestBody: { id: reminderId }, metadata: {} };
+    const begun = sameOperation(store, input);
+    if (!begun.created) return operationResult(begun.operation);
+    const current = store.getSetting(`user:${userId}`, 'reminders'), reminders = Array.isArray(current) ? current.filter(isRecord) : [];
+    if (!reminders.some(item => item.id === reminderId)) { store.finishOperation(id, 'failed'); throw new HttpError(404, 'Reminder not found.'); }
+    store.putSetting(`user:${userId}`, 'reminders', reminders.filter(item => item.id !== reminderId));
+    store.finishOperation(id, 'saved', reminderId);
+    return { status: 'saved', id: reminderId };
   }
 
   async function exportCsv(session: Session, range: Range): Promise<string> {
@@ -185,5 +241,5 @@ export function createHousehold({ store, sessions, records }: { store: Store; se
     return csvFor(current);
   }
 
-  return { state, savePreference, saveDuty, saveReminder, exportCsv };
+  return { state, savePreference, saveDuty, saveReminder, deleteReminder, exportCsv };
 }

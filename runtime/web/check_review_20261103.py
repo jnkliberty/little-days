@@ -478,7 +478,7 @@ def audit_labels(browser, base, noon):
         close_settings(page)
         page.locator('[data-act="open-more"]').click()
         rows = page.locator("[data-sheet] .nav-row").all_inner_texts()
-        check(f"{lang}: Night rules and Care labels say what they do, and the More list has no Reminder row (D4)", night == want[0] and want[1] not in [r.strip() for r in rows] and care == want[2])
+        check(f"{lang}: Night rules and Care labels say what they do, and the More list has the Reminder row", night == want[0] and want[1] in [r.strip() for r in rows] and care == want[2])
         page.context.close()
 
 

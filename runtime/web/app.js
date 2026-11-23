@@ -254,13 +254,13 @@ function applyIdentity(state) {
 }
 // The days this reply asked for (the default is yesterday and today) take its entries, but only the days where no newer reply was applied. Returns whether any day did.
 function applyEntries(state,seq,today,serverDay,offset) {
-  const incoming=Array.isArray(state.entries)?state.entries.map(e=>({...(offset?shiftEntry(e,offset):e),id:String(e.id)})):[];
+  const incoming=Array.isArray(state.entries)?state.entries.filter(e=>e&&e.type!=='reminder').map(e=>({...(offset?shiftEntry(e,offset):e),id:String(e.id)})):[];
   const keyOfDay=day=>shiftISO(today,day);
   const from=state.__range?.from||shiftISO(serverDay,-1),to=state.__range?.to||shiftISO(serverDay,1),lo=isoDay(from,today),hi=isoDay(to,today);
   const newer=day=>replyOrder.days.get(keyOfDay(day))>=seq,mine=new Set();
   for(let day=lo;day<hi;day++)if(!newer(day))mine.add(day);
   for(const e of incoming)if(!newer(dayOf(e.t)))mine.add(dayOf(e.t));
-  const kept=S.entries.filter(e=>!(dayOf(e.t)>=lo&&dayOf(e.t)<hi&&mine.has(dayOf(e.t)))),taken=incoming.filter(e=>mine.has(dayOf(e.t)));
+  const kept=S.entries.filter(e=>e.type==='reminder'||!(dayOf(e.t)>=lo&&dayOf(e.t)<hi&&mine.has(dayOf(e.t)))),taken=incoming.filter(e=>mine.has(dayOf(e.t)));
   const byId=new Map([...kept,...taken].map(e=>[String(e.id),e]));
   // A measurement added, changed or removed on a day loaded before (another adult's save) makes the growth history out of date.
   const seen=new Set([...mine].filter(day=>replyOrder.days.has(keyOfDay(day))));
@@ -283,6 +283,9 @@ function applySharedFields(state,today,offset) {
     const t0=start?isoDay(start.date,today)*1440+start.hour24*60 + +start.minute + Math.floor(instant%60000/1000)/60:timer.t0+offset;
     return {...timer,t0};
   };
+  const remSource=Array.isArray(state.reminders)?state.reminders:(Array.isArray(state.entries)?state.entries.filter(e=>e&&e.type==='reminder'):[]);
+  const reminders=hideDeleted(remSource.map(e=>({...(offset?shiftEntry(e,offset):e),type:'reminder',id:String(e.id)})));
+  S.entries=[...S.entries.filter(e=>e.type!=='reminder'),...reminders].sort((a,b)=>a.t-b.t);
   S.upcomingAppointments=Array.isArray(state.upcomingAppointments)?state.upcomingAppointments.map(e=>({...(offset?shiftEntry(e,offset):e),id:String(e.id)})):[];
   S.pendingChildSetup=state.pendingChildSetup||null;
   S.run=state.run===undefined?S.run:timerAt(state.run);S.sleepRun=state.sleepRun===undefined?S.sleepRun:timerAt(state.sleepRun);S.pumpRun=state.pumpRun===undefined?S.pumpRun:timerAt(state.pumpRun);S.timers=Array.isArray(state.timers)?state.timers.map(timerAt):[];S.preferences=state.preferences||{};S.permissions=state.permissions||{};S.dutyNote=state.dutyNote||'';S.dutyNoteBy=state.dutyNoteBy||state.dutyNoteAuthor||'';
@@ -521,7 +524,7 @@ document.addEventListener('submit',async ev=>{
   if(ev.target.id!=='login-form')return;ev.preventDefault();
   await submitLogin(ev.target);
 });
-document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-shell],[data-setting="night"],[data-setting][data-value]');if(!b)return;if(b.dataset.value&&b.dataset.setting){if(S.auth==='ready'){const v={lang:S.lang,units:unitsOf(),palette:S.pal,night:S.night};v[b.dataset.setting]=b.dataset.value;await persistPreferences(v);}return;}if(b.dataset.shell==='retry')boot();if(b.dataset.shell==='logout'){resetChat();S.auth='loading';render();try{await LittleDaysAPI.logout();S.sheet=null;S.drafts={};window.location.reload();}catch(error){S.auth='error';S.message=error.message||t('tryAgain');render();}}if(b.dataset.setting==='night')await persistPreferences({lang:S.lang,units:unitsOf(),palette:S.pal,night:!S.night});});
+document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-shell],[data-setting="night"],[data-setting][data-value]');if(!b)return;if(b.dataset.value&&b.dataset.setting){if(S.auth==='ready'){const v={lang:S.lang,units:unitsOf(),palette:S.pal,night:S.night};v[b.dataset.setting]=b.dataset.value;await persistPreferences(v);}return;}if(b.dataset.shell==='retry')boot();if(b.dataset.shell==='logout'){resetChat();S.auth='loading';render();try{await LittleDaysAPI.logout();await LittleDaysAlertsUI.unsubscribeOnLogout();S.sheet=null;S.drafts={};window.location.reload();}catch(error){S.auth='error';S.message=error.message||t('tryAgain');render();}}if(b.dataset.setting==='night')await persistPreferences({lang:S.lang,units:unitsOf(),palette:S.pal,night:!S.night});});
 
 /* ---------- icons ---------- */
 const ICON = {
@@ -1131,10 +1134,11 @@ function tlSleepParts(e,c,lo) {
 }
 // A record with no care color: medicine, temperature, growth, a reminder, and the other kinds.
 function tlOtherParts(e,c) {
+  const medNext=e.type==='med'?LittleDaysAlertsUI.medNextReadout(e,{lang:S.lang,zone:LittleDaysZone.get(),esc,localISOAt}):'';
   const r=e.type==='other'?otherRow(e):e.type==='med'?{icn:'med',title:t('medicine'),det:`${esc(e.name)}, ${esc(e.dose)} ${esc(e.unit||'')}`}:e.type==='temp'?{icn:'temp',title:t('temp'),det:fmtTemp(e.c)}
     :e.type==='growth'?{icn:'ruler',title:t('growth'),det:[e.kg!=null&&fmtWt(e.kg),e.cm!=null&&fmtLen(e.cm),e.head!=null&&fmtLen(e.head)].filter(Boolean).join(' · ')}
-    :{icn:'sleep',title:`${t('recipient')} · ${t(e.what)}`,det:`${esc(shownName(e.recipient))} · ${dateLabel(e.day)} ${clockAt(e.hour,e.minute,e.period)}`};
-  return ['t-plain','',r.icn,r.title,tlJoin([r.det,c.by])+c.note,tlTime(e)];
+    :{icn:'sleep',title:`${t('recipient')} · ${t(e.what)}`,det:`${esc(shownName(e.recipient))} · ${dateLabel(dayOf(e.t))} ${clockAt(e.hour,e.minute,e.period)}`};
+  return ['t-plain','',r.icn,r.title,tlJoin([r.det,c.by])+medNext+c.note,tlTime(e)];
 }
 function tlParts(e,lo) {
   const c={by:esc(shownName(e.by)),note:e.note?`<br>${esc(e.note)}`:'',dur:positive(e.dur)?tlDur(e.dur):''};
@@ -1616,11 +1620,12 @@ Object.assign(W,{
   runningSide:[(w,c)=>`${w} · ${c} running`,(w,c)=>`${w} · ${c} en curso`],
   confirmFeedSub:[(w,c)=>`${w} side · ${c}`,(w,c)=>`Lado ${w.toLowerCase()} · ${c}`],asleepFor:[d=>`Asleep for ${d}`,d=>`Durmiendo desde hace ${d}`],
 });
+const findEntry=id=>[...S.entries,...S.upcomingAppointments].find(x=>String(x.id)===String(id));
 const FORM_ICON={feed:'bottle',bottle:'bottle',pump:'bottle',breast:'nurse',sleep:'moon',diaper:'diaper',note:'note',other:'note',med:'pill',temp:'thermo',appointment:'calendar',visit:'clipboard',growth:'sprout',handoff:'swap',reminder:'bell',care:'clock',duty:'swap',split:'moon',correction:'clock',confirm:'swap',solids:'spoon',tummy:'tummy',bath:'bath',mile:'star'};
 // The care color and icon of a form: feed gold, sleep blue, diaper teal, everything else plain.
 function formLook(s){
   const kind=s?.kind||'';let key=kind==='quick'?s.what:kind;
-  if(kind==='edit'){const e=[...S.entries,...S.upcomingAppointments].find(x=>String(x.id)===String(s.id));key=e?.type==='other'?(e.what||'other'):(e?.type||'note');}
+  if(kind==='edit'){const e=findEntry(s.id);key=e?.type==='other'?(e.what||'other'):(e?.type||'note');}
   const care={feed:'t-feed',bottle:'t-feed',pump:'t-feed',breast:'t-feed',sleep:'t-sleep',split:'t-sleep',diaper:'t-dia'}[key]||'t-plain';
   return {cls:care,icon:FORM_ICON[key]||'note'};
 }
@@ -1664,7 +1669,7 @@ function feedHint(s){if(s.tab==='bottle')return !s.milk?t('hintMilk'):!(s.ml>0&&
 const chipB = (act, arg, on, label, cls = '') => `<button type="button" class="chip ${cls}" data-act="${act}" data-arg="${arg}" aria-pressed="${on}">${glyph('check')}${label}</button>`;
 function loggedByLocked(s){return !!(s.photo||s.photoFile)||(s.kind==='edit'&&!!S.entries.find(e=>e.id===s.id)?.photo);}
 function loggedByFields(s){
-  const original=s.kind==='edit'?[...S.entries,...S.upcomingAppointments].find(e=>e.id===s.id):null;
+  const original=s.kind==='edit'?findEntry(s.id):null;
   if(original?.type==='reminder')return '';
   const names=S.people.map(personName).filter(Boolean),locked=loggedByLocked(s),fallback=names.includes(original?.by)?original.by:personName(S.me);
   if(!locked)s.by??=fallback;
@@ -1692,7 +1697,7 @@ const clockField=(prefix,label,h,m,p,extra='')=>{
   const periodLabel=period=>S.lang==='es'?(period==='AM'?'a. m.':'p. m.'):period;
   return `<div class="form-field"><label class="fl" for="f-${prefix}Clock">${label}</label><div class="clock-input"><input class="field" id="f-${prefix}Clock" data-fid="${prefix}Clock" data-clock data-clock-numeric type="text" inputmode="numeric" autocomplete="off" value="${esc(value)}"${extra}><div class="clock-periods" role="group" aria-label="${esc(label)} ${periodLabel('AM')} / ${periodLabel('PM')}">${['AM','PM'].map(period=>`<button type="button" class="chip" data-act="clock-period" data-arg="${prefix}:${period}" aria-pressed="${p===period}">${glyph('check')}${periodLabel(period)}</button>`).join('')}</div></div></div>`;
 };
-const CLOCK_KEYS={manual:['hour','minute','period'],manualEnd:['endHour','endMinute','endPeriod'],edit:['hh','mm','period'],editEnd:['valueEndHour','valueEndMinute','valueEndPeriod']};
+const CLOCK_KEYS={manual:['hour','minute','period'],manualEnd:['endHour','endMinute','endPeriod'],edit:['hh','mm','period'],editEnd:['valueEndHour','valueEndMinute','valueEndPeriod'],remind:['hour','minute','period'],reminderEdit:['valueHour','valueMinute','valuePeriod']};
 const startedField=(s,label=t('startedL'))=>{const c=currentClock();return clockField('manual',label,s.hour??c.hour,s.minute??c.minute,s.period||c.period);};
 // A bottle or pump with no end has an end at its start; the end moves with the start until the end is typed.
 function rangeDefaults(s){const c=currentClock();s.manualDate??=dayISO(0);if(allowsZeroLength(s)){s.hour??=c.hour;s.minute??=c.minute;s.period??=c.period;s.endHour??=s.hour;s.endMinute??=s.minute;s.endPeriod??=s.period;s.manualDuration??='0';}}
@@ -1832,7 +1837,7 @@ function moreSheet() {
   const rows=(S.night?'':row('quick',t('solids'),'spoon','solids')+row('quick',t('tummy'),'tummy','tummy')+row('quick',t('bath'),'bath','bath')+row('quick',t('mile'),'star','mile'))
     +row('open-med',t('medicine'),'pill')+row('open-temp',t('temp'),'therm')+(growth?row('open-growth',t('growth'),'sprout'):'')
     +(records?row('open-visit',t('moreVisit'),'cross')+row('open-appointment',t('moreAppt'),'cal'):'')
-    +row('open-note',t('note'),'note')+row('open-handoff',t('handoff'),'swap');  // no Reminder row: reminders are stored but never delivered (decision D4, 2026-11-12)
+    +row('open-note',t('note'),'note')+row('open-handoff',t('handoff'),'swap')+row('open-reminder',t('moreRemind'),'clock');
   return sheetShell(t('logElse'),`<nav class="card nav icons" aria-label="${t('logElse')}"><ul>${rows}</ul></nav>`,null);
 }
 // Settings (round 3): On duty, Baby, Language, Units, Night, Care connection, then who is signed in.
@@ -1860,6 +1865,7 @@ function settingsSheet(s) {
     ${group(t('nightL'),nav(`<strong>${t('dimSchedule')}</strong><span class="sub">${dimWord}</span>`,'data-act="night-open"'),'nav')}
     ${nightOpen?`<section class="card settings-card" data-night>${themeRow()}<button type="button" class="chip" data-setting="night" data-focus="setting-night" aria-pressed="${S.night}">${glyph('check')}${t('nightRules')}</button></section>`:''}
     ${group(t('fcSetH'),`<div class="form-field"><span class="fl" id="fc-l">${t('fcSetL')}</span>${pick('forecast',[['on',t('fcOn')],['off',t('fcOff')]],S.preferences?.forecast==='off'?'off':'on').replace('role="group"','role="group" aria-labelledby="fc-l"')}</div>`)}
+    ${LittleDaysAlertsUI.settingsHTML({lang:S.lang,prefs:S.preferences,resourceAllowed,glyph,esc})}
     ${LittleDaysCryUI.settingsHTML()}
     ${LittleDaysAPI.careLink?group(t('careConn'),nav(`<strong class="conn">${S.careData?.exportOptIn?glyph('check'):''}${care}</strong>`,'data-act="open-care"'),'nav'):''}
     <section class="card settings-card"><p class="line">${t('signedInAs')} <strong class="account-name">${esc(shownName(S.me))}</strong></p><button type="button" class="back" data-extra data-shell="logout">${t('logout')}</button></section></div>`,null);
@@ -1941,8 +1947,9 @@ function quickSheet(s) {
   return sheetShell(t(s.what === 'mile' ? 'mile' : s.what),body,{label:t('save'),on:SAVE_VALIDATORS.quick(s)});
 }
 function medSheet(s) {
-  const body = field('name',t('medName'),s.name||'') + field('dose',t('dose'),s.dose||'','number','min="0.01" step="any"') + choices('unit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','ml'],['tablets','tablets'],['drops','drops']],s.unit||'') + field('medDate',t('date'),s.date||dayISO(0),'date') + clockChoices('med',s.hour??'3',s.minute??'20',s.period||'PM') + loggedByFields(s) + noteBlock(s,field('medNote',t('note'),s.note||''),s.note);
-  return sheetShell(t('medicine'), body, {label:t('save'), on:!!(s.name||'').trim() && positive(s.dose) && ['mg','ml','tablets','drops'].includes(s.unit) && validEventDateTime(s)});
+  const nextField = LittleDaysAlertsUI.medNextFieldHTML({id:'next',value:s.next,lang:S.lang,glyph,esc});
+  const body = field('name',t('medName'),s.name||'') + field('dose',t('dose'),s.dose||'','number','min="0.01" step="any"') + choices('unit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','ml'],['tablets','tablets'],['drops','drops']],s.unit||'') + nextField + field('medDate',t('date'),s.date||dayISO(0),'date') + clockChoices('med',s.hour??'3',s.minute??'20',s.period||'PM') + loggedByFields(s) + noteBlock(s,field('medNote',t('note'),s.note||''),s.note);
+  return sheetShell(t('medicine'), body, {label:t('save'), on:!!(s.name||'').trim() && positive(s.dose) && ['mg','ml','tablets','drops'].includes(s.unit) && LittleDaysAlertsUI.validMedNext(s.next) && validEventDateTime(s)});
 }
 function tempSheet(s) {
   const shown=s.c==null?'':(s.tu==='F'?c2f(s.c):s.c).toFixed(1);
@@ -2046,15 +2053,33 @@ function typedMl(v,u){const s=String(v).trim().replace(',','.');if(!s)return 0;i
 // A bottle saves the date and time its form shows (set when the Bottle tab opens).
 function bottleAmountOk(s){return ['breast','formula'].includes(s?.milk)&&Number.isFinite(s?.ml)&&s.ml>0&&s.ml<=400;}
 function bottleOk(s){return amountValid(s)&&['breast','formula'].includes(s?.milk)&&validDurationRange(s,'manualDate','hour','minute','period','manualDuration');}
-function reminderSheet(s) { return sheetShell(t('moreRemind'),`<p class="cn">${t('reminderNote')}</p>${choices('recipient',t('recipient'),adultChoices(),s.recipient)}${choices('remindWhat',t('reminderFor'),[['feed',t('feed')],['medicine',t('medicine')],['sleep',t('sleep')]],s.what||'feed')}${field('remindDay',t('date'),s.date||dayISO(0),'date')}${clockChoices('remind',s.hour??'8',s.minute??'00',s.period||'AM')}<label class="chips">${chipB('reminderEnabled','yes',!!s.enabled,t('enableReminder'),'sel-sleep')}</label>`,{label:t('save'),on:!!s.enabled&&validEventDateTime(s)&&adultChoices().some(([name])=>name===s.recipient)}); }
+function reminderSheet(s) {
+  const me=personName(S.me),who=s.recipient||me;
+  const upcoming=LittleDaysAlertsUI.upcomingRemindersHTML({entries:S.entries,lang:S.lang,glyph,iconBlock,esc,dateLabel,clockAt,dayOf,t});
+  const mode=LittleDaysAlertsUI.reminderNoteMode({enabled:!!s.enabled,prefs:S.preferences});
+  const note=LittleDaysAlertsUI.reminderNoteHTML(mode,{lang:S.lang,glyph,esc});
+  const rec=`<div class="form-field"><span class="fl">${esc(LittleDaysAlertsUI.L(S.lang,'forMe'))}</span><p class="rem-recipient">${esc(shownName(who))}</p></div>`;
+  const whatChips=choiceChips('alerts-rem-what',t('reminderFor'),[['feed',t('feed')],['medicine',t('medicine')],['sleep',t('sleep')]],s.what||'feed');
+  const form=`<section class="rem-sec"><h2>${esc(LittleDaysAlertsUI.L(S.lang,'newHeading'))}</h2>${note}${rec}${whatChips}${field('remindDay',t('date'),s.date||dayISO(0),'date')}${clockField('remind',t('time'),s.hour??'8',s.minute??'00',s.period||'AM')}<div class="chips">${chipB('reminderEnabled','yes',!!s.enabled,t('enableReminder'),'sel-sleep')}</div></section>`;
+  return sheetShell(LittleDaysAlertsUI.L(S.lang,'remindersTitle'),`${upcoming}${form}`,{label:LittleDaysAlertsUI.L(S.lang,'addReminder'),on:validEventDateTime(s)&&who===me});
+}
 // Round 3: a record opens as its own form. The common parts (Day, Logged by, Note) sit in More details; Delete is a text link after Save.
 const pairChips=(act,label,vals,cur,cls='')=>`<div class="form-field"><span class="fl">${label}</span><div class="${vals.length===2?'pair':'chips'}" role="group" aria-label="${label}">${vals.map(([v,l])=>chipB(act,v,cur===v,l,cls)).join('')}</div></div>`;
 const editMore=(s,inner,extra=false)=>`<details class="more-details" data-more-details data-r="R4"${extra?' data-extra':''}${s.detailsOpen?' open':''}><summary class="textlink">${t('moreDetails')}${glyph('chev')}</summary><div class="details-body">${inner}</div></details>`;
 function editSheet(s) {
-  const e=[...S.entries,...S.upcomingAppointments].find(x=>x.id===s.id);if(!e)return sheetShell(t('note'),'',null);
+  const e=findEntry(s.id);if(!e)return sheetShell(t('note'),'',null);
   const own=['appointment','visit'].includes(e.what),saveKey={feed:'saveFeed',bottle:'saveFeed',pump:'savePumping',sleep:'saveSleep',diaper:'saveDiaper',note:'saveNote'}[e.type],save={label:t(!own&&saveKey||'save'),on:validEdit(e,s)};
   // Appointments and visits draw their own date, time and note in editOtherFields.
   if(own)return sheetShell(t('edit'),editOtherFields(e,s),save);
+  if(e.type==='reminder'){
+    const mode=LittleDaysAlertsUI.reminderNoteMode({enabled:!!s.valueEnabled,prefs:S.preferences});
+    const note=LittleDaysAlertsUI.reminderNoteHTML(mode,{lang:S.lang,glyph,esc});
+    const rec=`<div class="form-field"><span class="fl">${esc(LittleDaysAlertsUI.L(S.lang,'forMe'))}</span><p class="rem-recipient">${esc(shownName(s.valueRecipient||personName(S.me)))}</p></div>`;
+    const whatChips=choiceChips('alerts-rem-edit-what',t('reminderFor'),[['feed',t('feed')],['medicine',t('medicine')],['sleep',t('sleep')]],s.valueWhat);
+    const body=note+rec+whatChips+field('reminderDate',t('date'),s.valueDate,'date')+clockField('reminderEdit',t('time'),s.valueHour,s.valueMinute,s.valuePeriod)+`<div class="chips">${chipB('editReminder','enabled',!!s.valueEnabled,t('enableReminder'),'sel-sleep')}</div>`;
+    save.after=deleteButton(e);
+    return sheetShell(LittleDaysAlertsUI.L(S.lang,'editHeading'),body,save);
+  }
   const ranged='valueEndHour' in s,day=field('editDay',t('dayL'),s.editDate,'date'),by=loggedByFields(s),note=textareaField('editNote',t('note'),s.editNote||'',3);
   const started=clockField('edit',ranged||e.type==='diaper'?t('startedL'):t('time'),s.hh,s.mm,s.period);
   const ended=`<div class="range-end">${clockField('editEnd',t('endedL'),s.valueEndHour,s.valueEndMinute,s.valueEndPeriod)}<p class="cn range-len" data-range-len data-extra aria-live="polite"${allowsZeroLength(s)&&!positive(s.valueDur)?' hidden':''}>${rangeText(s.valueDur)}</p>${lateError(s,'invalidRange')}</div>`;
@@ -2081,7 +2106,7 @@ function editSheet(s) {
   return sheetShell(what?t('editWhat',t(what)):t('edit'),main+editMore(s,more,extra),save);
 }
 // The one permission test for deleting a record: the edit form's Delete and the Timeline swipe both use it.
-function canDeleteEntry(e){const resource=String(e.id).startsWith('app:')?(['bath','tummy'].includes(e.what)?'tummy-times':e.what==='appointment'?'notes':'feedings'):String(e.id).split(':')[0];return resourceAllowed(resource,'delete');}
+function canDeleteEntry(e){if(e.type==='reminder')return true;const resource=String(e.id).startsWith('app:')?(['bath','tummy'].includes(e.what)?'tummy-times':e.what==='appointment'?'notes':'feedings'):String(e.id).split(':')[0];return resourceAllowed(resource,'delete');}
 function deleteButton(e){return canDeleteEntry(e)?`<button type="button" class="textlink" data-act="delete-entry">${t('deleteShort')}</button>`:'';}
 function exactISOAt(minutes){return new Date(Date.parse(localISOAt(Math.floor(minutes)))+Math.round((minutes-Math.floor(minutes))*60000)).toISOString();}
 const instantMinutes=iso=>(Date.parse(iso)-Date.parse(localISOAt(0)))/60000;
@@ -2112,7 +2137,7 @@ function editFeedingFields(e,s){
 const colWarn = col => ['pale', 'black', 'red'].includes(col) ? `<div class="warn">${ic('warn')}${t('callPed')}</div>` : '';
 function editHealthFields(e,s){
   if(e.type==='diaper')return choiceChips('editKind',t('diaper'),[['W',t('wet')],['D',t('dirty')],['B',t('both')]],s.valueKind,'big3')+choices('valueTex',t('texture'),[['',t('notSet')],...TEXES.map(k=>[k,tt('tex',k)])],s.valueTex||'')+choices('valueCol',t('color'),[['',t('notSet')],...Object.keys(COLS).map(k=>[k,tt('col',k)])],s.valueCol||'')+`<div data-col-warn role="status">${colWarn(s.valueCol)}</div>`;
-  if(e.type==='med')return field('valueName',t('medName'),s.valueName)+field('valueDose',t('dose'),s.valueDose,'number','min="0.01" step="any"')+choices('valueUnit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','ml'],['tablets','tablets'],['drops','drops']],s.valueUnit||'');
+  if(e.type==='med')return field('valueName',t('medName'),s.valueName)+field('valueDose',t('dose'),s.valueDose,'number','min="0.01" step="any"')+choices('valueUnit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','ml'],['tablets','tablets'],['drops','drops']],s.valueUnit||'')+LittleDaysAlertsUI.medNextFieldHTML({id:'valueNext',value:s.valueNext,lang:S.lang,glyph,esc});
   if(e.type==='temp')return field('valueTemp',`${t('temp')} (°${s.valueTempUnit})`,s.valueTemp,'number','step="0.1"');
   if(e.type==='growth')return field('valueKg',`${t('weight')} (kg)`,s.valueKg??'','number','min="0" step="any"')+field('valueCm',`${t('length')} (cm)`,s.valueCm??'','number','min="0" step="any"')+field('valueHead',`${t('head')} (cm)`,s.valueHead??'','number','min="0" step="any"');
   return '';
@@ -2142,15 +2167,15 @@ const EDIT_VALIDATORS={
   pump:s=>validNumber(s.valueLeftMl)&&validNumber(s.valueRightMl)&&(+s.valueLeftMl + +s.valueRightMl)>0&&validEditRange(s,s.valueDur),
   sleep:s=>[true,false].includes(s.valueNap)&&validEditRange(s,s.valueDur),
   diaper:s=>['W','D','B'].includes(s.valueKind),
-  med:s=>!!s.valueName?.trim()&&positive(s.valueDose)&&['mg','ml','tablets','drops'].includes(s.valueUnit),
+  med:s=>!!s.valueName?.trim()&&positive(s.valueDose)&&['mg','ml','tablets','drops'].includes(s.valueUnit)&&LittleDaysAlertsUI.validMedNext(s.valueNext),
   temp:s=>validNumber(s.valueTemp),
   growth:s=>[s.valueKg,s.valueCm,s.valueHead].some(positive)&&[s.valueKg,s.valueCm,s.valueHead].every(v=>v===''||positive(v)),
   note:(s,e)=>e?.what==='visit'?!!(s.valueProvider||s.valueReason||s.valueObservations||s.valueInstructions||s.valueWeightKg!==''||s.valueLengthCm!==''||s.valueHeadCm!=='')&&startMinutes(s.editDate,s.hh,s.mm,s.period)<=nowM():!!s.editNote?.trim()||!!s.photo,
   other:(s,e)=>e.what==='appointment'?!!s.valueTitle?.trim()&&startMinutes(s.editDate,s.hh,s.mm,s.period)!==null:e.what==='mile'?!!s.editTitle?.trim():e.what==='solids'?!!s.valueFood?.trim()&&(s.valueAmount===''||validNumber(s.valueAmount)):(e.what==='tummy'||e.what==='bath')&&(s.valueCompleted?startMinutes(s.editDate,s.hh,s.mm,s.period)!==null&&startMinutes(s.editDate,s.hh,s.mm,s.period)<=nowM():validEditRange(s,s.valueDur)),
-  reminder:s=>adultChoices().some(([name])=>name===s.valueRecipient)&&['feed','sleep','medicine'].includes(s.valueWhat)&&validDate(s.valueDate)&&validNumber(s.valueHour)&&validNumber(s.valueMinute)
+  reminder:s=>s.valueRecipient===personName(S.me)&&['feed','sleep','medicine'].includes(s.valueWhat)&&validDate(s.valueDate)&&Number.isInteger(+s.valueHour)&&+s.valueHour>=1&&+s.valueHour<=12&&Number.isInteger(+s.valueMinute)&&+s.valueMinute>=0&&+s.valueMinute<=59&&['AM','PM'].includes(s.valuePeriod)
 };
 function positive(v){return validNumber(v)&&+v>0;}
-function validEdit(e,s){const h=+s.hh,m=+s.mm;return !!e&&validDate(s.editDate)&&Number.isInteger(h)&&h>=1&&h<=12&&Number.isInteger(m)&&m>=0&&m<=59&&['AM','PM'].includes(s.period)&&(EDIT_VALIDATORS[e.type]?.(s,e)??true);}
+function validEdit(e,s){if(!e)return false;if(e.type==='reminder')return EDIT_VALIDATORS.reminder(s);const h=+s.hh,m=+s.mm;return validDate(s.editDate)&&Number.isInteger(h)&&h>=1&&h<=12&&Number.isInteger(m)&&m>=0&&m<=59&&['AM','PM'].includes(s.period)&&(EDIT_VALIDATORS[e.type]?.(s,e)??true);}
 function hasDraft(s){return !!(s?.dirty||s?.startDirty);}
 function dutySheet(s){const adults=S.people.map(personName).filter(Boolean);return sheetShell(t('dutyTitle'),`<div class="chips" role="group" aria-label="${t('dutyTitle')}">${adults.map(n=>chipB('dwho',n,s.who===n,esc(shownName(n)),'big3 sel-sleep')).join('')}</div>${textareaField('dutyNote',t('note'),s.note||'',2,`aria-label="${t('handoff')}" placeholder="${t('optional')}"`)}`,{label:t('save'),on:adults.includes(s.who)&&s.who!==S.duty});}
 function confirmSheet(s){
@@ -2177,8 +2202,8 @@ function localISOAt(offsetMinutes) {
   return new Date(instant).toISOString();
 }
 function eventForAPI(event) {
-  const body={...event};delete body.id;delete body.by;delete body.t;delete body.sid;delete body.photoFile;
-  const at=exactISOAt(event.t??nowExactM());body.time=at;
+  const body={...event};delete body.id;delete body.by;delete body.t;delete body.sid;delete body.photoFile;delete body.timeISO;
+  const at=typeof event.time==='string'&&Number.isFinite(Date.parse(event.time))?event.time:exactISOAt(event.t??nowExactM());body.time=at;
   if(Number.isFinite(+event.dur)&&event.dur!=null){body.start=at;body.end=exactISOAt((event.t??nowExactM())+Number(event.dur));body.duration=Number(event.dur);delete body.dur;}
   if(event.photo&&String(event.photo).startsWith('blob:'))delete body.photo;
   return body;
@@ -2398,15 +2423,20 @@ async function saveQuick(s){
 function editBase(e,s){if(e.type==='note')e.text=s.editNote||'';else e.note=s.editNote||'';e.t=isoDay(s.editDate)*1440+((+s.hh%12)+(s.period==='PM'?12:0))*60+(+s.mm||0);if(e.type==='note'||e.what==='mile'){e.title=s.editTitle||'';e.photo=s.photoRemoved?null:(s.photo||e.photo);e.photoName=s.photoRemoved?'':(s.photoName||e.photoName||'');}}
 function editEntryValues(e,s){editFeedValues(e,s);editHealthValues(e,s);editOtherValues(e,s);if(e.what==='appointment')Object.assign(e,{title:s.valueTitle.trim(),provider:s.valueProvider,location:s.valueLocation,note:s.editNote});if(e.what==='visit')Object.assign(e,{provider:s.valueProvider,reason:s.valueReason,observations:s.valueObservations,instructions:s.valueInstructions,weightKg:s.valueWeightKg===''?null:+s.valueWeightKg,lengthCm:s.valueLengthCm===''?null:+s.valueLengthCm,headCm:s.valueHeadCm===''?null:+s.valueHeadCm,followUpDate:s.valueFollowUp||null});}
 function editFeedValues(e,s){if(e.type==='feed')Object.assign(e,{side:s.valueSide,dur:+s.valueDur});if(e.type==='bottle')Object.assign(e,{ml:+s.valueMl,milk:s.valueMilk,dur:+s.valueDur});if(e.type==='pump'){e.sideAmounts={L:+s.valueLeftMl,R:+s.valueRightMl};e.leftMl=+s.valueLeftMl;e.rightMl=+s.valueRightMl;e.ml=+s.valueLeftMl + +s.valueRightMl;e.side='B';e.dur=+s.valueDur;}if(e.type==='sleep')Object.assign(e,{dur:+s.valueDur,nap:s.valueNap});}
-function editHealthValues(e,s){if(e.type==='diaper')Object.assign(e,{kind:s.valueKind,tex:s.valueTex||null,col:s.valueCol||null});if(e.type==='med')Object.assign(e,{name:s.valueName,dose:s.valueDose,unit:s.valueUnit});if(e.type==='temp')e.c=s.valueTempUnit==='F'?f2c(+s.valueTemp):+s.valueTemp;if(e.type==='growth'){for(const k of ['kg','cm','head'])delete e[k];if(s.valueKg!=='')e.kg=+s.valueKg;if(s.valueCm!=='')e.cm=+s.valueCm;if(s.valueHead!=='')e.head=+s.valueHead;}if(e.type==='reminder')Object.assign(e,{recipient:s.valueRecipient,what:s.valueWhat,enabled:s.valueEnabled,day:isoDay(s.valueDate),hour:+s.valueHour,minute:+s.valueMinute,period:s.valuePeriod});}
+function editHealthValues(e,s){if(e.type==='diaper')Object.assign(e,{kind:s.valueKind,tex:s.valueTex||null,col:s.valueCol||null});if(e.type==='med')Object.assign(e,{name:s.valueName,dose:s.valueDose,unit:s.valueUnit,next:LittleDaysAlertsUI.parseMedNext(s.valueNext)});if(e.type==='temp')e.c=s.valueTempUnit==='F'?f2c(+s.valueTemp):+s.valueTemp;if(e.type==='growth'){for(const k of ['kg','cm','head'])delete e[k];if(s.valueKg!=='')e.kg=+s.valueKg;if(s.valueCm!=='')e.cm=+s.valueCm;if(s.valueHead!=='')e.head=+s.valueHead;}if(e.type==='reminder')Object.assign(e,{recipient:s.valueRecipient,what:s.valueWhat,enabled:s.valueEnabled,day:isoDay(s.valueDate),hour:+s.valueHour,minute:+s.valueMinute,period:s.valuePeriod});}
 function editOtherValues(e,s){if(e.type==='other'&&e.what==='solids')Object.assign(e,{food:s.valueFood.trim(),foodId:LITTLE_DAYS_FOODS.resolve(s.valueFood),preference:s.valuePreference===undefined?e.preference??null:s.valuePreference,amount:s.valueAmount===''?null:+s.valueAmount});if(e.type==='other'&&(e.what==='tummy'||e.what==='bath'))Object.assign(e,{dur:s.valueCompleted?null:(s.valueDur===''?null:+s.valueDur),completed:!!s.valueCompleted});}
 function reminderPayload(recipient,what,date,hour,minute,period,enabled){const day=isoDay(date),h=+hour,m=+minute;if(!Number.isFinite(day)||!Number.isInteger(h)||h<1||h>12||!Number.isInteger(m)||m<0||m>59)throw new Error(t('saveFailed'));return {recipient,what,scheduledAt:localISOAt(day*1440+(h%12+(period==='PM'?12:0))*60+m),enabled:!!enabled};}
-function editForAPI(e,s){const body=withLoggedBy(eventForAPI(e),s);if(!s.loadedRange)return body;const r=editRange(s);return {...body,time:exactISOAt(r.start),start:exactISOAt(r.start),end:exactISOAt(r.end),duration:r.end-r.start,expected:s.loadedRange.expected};}
-async function saveEdit(s){const original=[...S.entries,...S.upcomingAppointments].find(x=>String(x.id)===String(s.id));if(!original||!validEdit(original,s))return;const e={...original};editBase(e,s);editEntryValues(e,s);let body=e.type==='reminder'?reminderPayload(s.valueRecipient,s.valueWhat,s.valueDate,s.valueHour,s.valueMinute,s.valuePeriod,s.valueEnabled):editForAPI(e,s);if((e.type==='note'||e.what==='mile')&&s.photoRemoved&&!s.photoFile)body.removePhoto=true;body=s._preparedBody||(s._preparedBody=body);
+function editForAPI(e,s){
+  const body=withLoggedBy(eventForAPI(e),s);
+  if(e.type==='med'&&s.loadedTime?.timeISO&&s.editDate===s.loadedTime.date&&s.hh===s.loadedTime.hh&&s.mm===s.loadedTime.mm&&s.period===s.loadedTime.period)body.time=s.loadedTime.timeISO;
+  if(!s.loadedRange)return body;
+  const r=editRange(s);return {...body,time:exactISOAt(r.start),start:exactISOAt(r.start),end:exactISOAt(r.end),duration:r.end-r.start,expected:s.loadedRange.expected};
+}
+async function saveEdit(s){const original=findEntry(s.id);if(!original||!validEdit(original,s))return;const e={...original};editBase(e,s);editEntryValues(e,s);let body=e.type==='reminder'?reminderPayload(s.valueRecipient,s.valueWhat,s.valueDate,s.valueHour,s.valueMinute,s.valuePeriod,s.valueEnabled):editForAPI(e,s);if((e.type==='note'||e.what==='mile')&&s.photoRemoved&&!s.photoFile)body.removePhoto=true;body=s._preparedBody||(s._preparedBody=body);
   const draft=S.sheet,op=operationFor(s);S.busy=true;S.message='';render();try{const result=e.type==='reminder'?await LittleDaysAPI.writes.saveReminder(e.id,body,op):draft.photoFile?await LittleDaysAPI.writes.savePhoto({...body,id:e.id},draft.photoFile,op):await LittleDaysAPI.writes.updateEntry(e.id,body,op);const ctx={sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,photoChanged:!!(draft.photoFile||body.removePhoto||original.photo),operationOwner:s,growth:e.type==='growth'};await acceptWrite(result,()=>t('saved'),ctx);}catch(error){await recoverWrite(error,()=>t('saved'),{sheet:draft,close:true,photoSheet:draft?.photoFile?draft:null,photoChanged:!!(draft.photoFile||body.removePhoto||original.photo),operationOwner:s,growth:e.type==='growth',retry:()=>saveEdit(s)});}finally{S.busy=false;render();}}
 async function deleteEntry(s){if(!s||!window.confirm(t('confirmDelete')))return;return removeEntry(s,S.sheet,{retry:()=>deleteEntry(s)});}
 // The delete request itself, for the edit form (draft = its open form) and the Timeline swipe (no form; `more` adds its own callbacks and wording).
-async function removeEntry(s,draft,more={}){const owner=s._deleteOperation||(s._deleteOperation={}),op=operationFor(owner),label=more.label||(()=>t('saved')),ctx={sheet:draft,close:!!draft,operationOwner:owner,growth:S.entries.some(x=>String(x.id)===String(s.id)&&x.type==='growth'),photoChanged:S.entries.some(x=>String(x.id)===String(s.id)&&!!x.photo),retry:()=>removeEntry(s,draft,more),...more};S.busy=true;S.message='';render();try{const result=await LittleDaysAPI.writes.deleteEntry(s.id,op,more.keepalive);await acceptWrite(result,label,ctx);}catch(error){await recoverWrite(error,label,ctx);}finally{S.busy=false;render();}}
+async function removeEntry(s,draft,more={}){const owner=s._deleteOperation||(s._deleteOperation={}),op=operationFor(owner),label=more.label||(()=>t('saved')),isRem=String(s.id).startsWith('reminder:'),ctx={sheet:draft,close:!!draft,operationOwner:owner,growth:S.entries.some(x=>String(x.id)===String(s.id)&&x.type==='growth'),photoChanged:S.entries.some(x=>String(x.id)===String(s.id)&&!!x.photo),retry:()=>removeEntry(s,draft,more),...more};S.busy=true;S.message='';render();try{const result=isRem?await LittleDaysAPI.writes.deleteReminder(s.id,op,more.keepalive):await LittleDaysAPI.writes.deleteEntry(s.id,op,more.keepalive);await acceptWrite(result,label,ctx);}catch(error){await recoverWrite(error,label,ctx);}finally{S.busy=false;render();}}
 async function saveSplit(s){
   if(!validSplit(s))return;
   const body=s._preparedBody||(s._preparedBody={wokeAt:new Date(splitClock(s,'woke')).toISOString(),sleptAt:new Date(splitClock(s,'slept')).toISOString(),expected:s.expected}),op=operationFor(s),context={sheet:s,close:true,operationOwner:s,retry:()=>saveSplit(s)};
@@ -2422,14 +2452,14 @@ async function saveDiaper(kind){
   return addEntries([{type:'diaper',kind,note:s.note||'',...(s.tex?{tex:s.tex}:{}),...(s.col?{col:s.col}:{}),t:addTime(s)}],()=>t('savedDia',kindWord(kind)),null,{detailsToast:true});
 }
 async function saveOther(s){
-  if(s.kind==='med'&&s.name?.trim()&&positive(s.dose)&&['mg','ml','tablets','drops'].includes(s.unit)&&validEventDateTime(s)){const tm=isoDay(s.date||dayISO(0))*1440+(+s.hour%12+(s.period==='PM'?12:0))*60+(+s.minute||0);return addEntries([{type:'med',name:s.name.trim(),dose:s.dose.trim(),unit:s.unit.trim(),next:s.next||null,t:tm,note:s.note||''}],()=>t('savedItem',t('medicine')));}
+  if(s.kind==='med'&&s.name?.trim()&&positive(s.dose)&&['mg','ml','tablets','drops'].includes(s.unit)&&LittleDaysAlertsUI.validMedNext(s.next)&&validEventDateTime(s)){const tm=isoDay(s.date||dayISO(0))*1440+(+s.hour%12+(s.period==='PM'?12:0))*60+(+s.minute||0),oc=s.openedSnap,untouched=Boolean(s.openedAtISO&&oc&&s.date===oc.date&&String(s.hour)===String(oc.hour)&&String(s.minute)===String(oc.minute)&&s.period===oc.period);return addEntries([{type:'med',name:s.name.trim(),dose:String(s.dose).trim(),unit:s.unit.trim(),next:LittleDaysAlertsUI.parseMedNext(s.next),t:tm,...(untouched?{time:s.openedAtISO}:{}),note:s.note||''}],()=>t('savedItem',t('medicine')));}
   if(s.kind==='temp'&&Number.isFinite(s.c)&&s.c>=0&&validEventDateTime(s)){const tm=isoDay(s.date||dayISO(0))*1440+(+s.hour%12+(s.period==='PM'?12:0))*60+(+s.minute||0);return addEntries([{type:'temp',c:s.c,t:tm,note:s.tempNote||''}],()=>t('savedItem',t('temp')));}
   if(s.kind==='growth')return saveGrowth(s);
   if(s.kind==='note'&&(s.text.trim()||s.photoFile)&&pointTimeOk(s))return addEntries([{type:'note',title:s.title||'',text:s.text.trim(),t:addTime(s)}],()=>t('savedItem',t('note')),s.photoFile||null);
   if(s.kind==='appointment')return saveAppointment(s);
   if(s.kind==='visit')return saveVisit(s);
   if(s.kind==='handoff'&&s.text?.trim())return addEntries([{type:'note',title:'handoff',text:s.text.trim(),t:nowM()}],()=>t('savedItem',t('handoff')));
-  if(s.kind==='reminder'&&s.enabled&&s.recipient&&s.date)return saveReminder(s);
+  if(s.kind==='reminder'&&s.recipient===personName(S.me)&&validEventDateTime(s))return saveReminder(s);
   if(s.kind==='duty')return saveDuty(s);
 }
 async function saveAppointment(s){return addEntries([{type:'other',what:'appointment',title:s.title.trim(),provider:s.provider||'',location:s.location||'',note:s.note||'',t:startMinutes(s.date,s.hour,s.minute,s.period)}],()=>t('savedItem',t('appointment')));}
@@ -2545,10 +2575,10 @@ function formAction(a){switch(a){
     case 'open-dia': S.sheet = {kind: 'diaper', type: null, tex: null, col: null}; break;
     case 'open-sleep': {const draft=S.drafts.sleep||{kind:'sleep',nap:napNow(),manual:false};if(!canStartTimer()&&!shownRun(S.sleepRun)&&!draft.manual){draft.manual=true;draft.manualDate=dayISO(0);const c=currentClock();Object.assign(draft,c,{endHour:c.hour,endMinute:c.minute,endPeriod:c.period,manualDuration:'0'});}S.sheet=draft;delete S.drafts.sleep;break;}
     case 'open-more': S.sheet = {kind: 'more'}; break;
-    case 'open-settings': S.sheet = {kind: 'settings'}; break;
+    case 'open-settings': S.sheet = {kind: 'settings'}; void LittleDaysAlertsUI.refresh(render); break;
     case 'night-open': if(S.sheet?.kind==='settings')S.sheet.nightOpen=!S.sheet.nightOpen; break;
     case 'open-care': S.message='';S.sheet={kind:'care',careStart:'',careEnd:''};void refreshCare();break;
-    case 'open-med': S.sheet=S.drafts.med||{kind:'med',name:'',dose:'',unit:'',next:'',date:dayISO(0),...currentClock()};delete S.drafts.med;break;
+    case 'open-med': {const c=currentClock(),d=dayISO(0);S.sheet=S.drafts.med||{kind:'med',name:'',dose:'',unit:'',next:'',date:d,...c,openedAtISO:new Date().toISOString(),openedSnap:{date:d,...c}};delete S.drafts.med;break;}
     case 'open-temp': S.sheet=S.drafts.temp||{kind:'temp',tu:DEFU.temp(unitsOf()),temperature:'',c:null,date:dayISO(0),...currentClock(),tempNote:''};delete S.drafts.temp;break;
     case 'open-growth': S.sheet=S.drafts.growth||{kind:'growth',weight:'',length:'',head:'',wu:DEFU.wt(unitsOf()),lu:DEFU.len(unitsOf()),hu:DEFU.len(unitsOf())};delete S.drafts.growth;break;
     case 'growth-birth': if(S.sheet?.kind==='growth'&&validDate(S.child?.birthDate))Object.assign(S.sheet,{manualDate:S.child.birthDate,timeEdited:true,dirty:true});break;
@@ -2556,13 +2586,13 @@ function formAction(a){switch(a){
     case 'open-appointment': S.sheet=S.drafts.appointment||{kind:'appointment',title:'',provider:'',location:'',note:'',date:dayISO(1),hour:'9',minute:'00',period:'AM'};delete S.drafts.appointment;break;
     case 'open-visit': S.sheet=S.drafts.visit||{kind:'visit',provider:'',reason:'',observations:'',instructions:'',weightKg:'',lengthCm:'',headCm:'',followUpDate:'',date:dayISO(0),...currentClock(),photo:''};delete S.drafts.visit;break;
     case 'open-handoff': S.sheet=S.drafts.handoff||{kind:'handoff',text:''};delete S.drafts.handoff;break;
-    case 'open-reminder': S.sheet=S.drafts.reminder||{kind:'reminder',recipient:signedInRecipient(),what:'feed',date:dayISO(0),hour:'8',minute:'00',period:'AM',enabled:false};delete S.drafts.reminder;break;
+    case 'open-reminder': S.sheet=S.drafts.reminder||{kind:'reminder',recipient:signedInRecipient(),what:'feed',date:dayISO(0),hour:'8',minute:'00',period:'AM',enabled:true};delete S.drafts.reminder;void LittleDaysAlertsUI.refresh(render);break;
     default:return false;}return true;}
 function clockOf(t){const m=((Math.floor(t)%1440)+1440)%1440,h=Math.floor(m/60);return {hh:String(h%12||12),mm:pad(m%60),period:h<12?'AM':'PM'};}
 function currentClock(){const c=clockOf(nowM());return {hour:c.hh,minute:c.mm,period:c.period};}
 // Typed time text belongs to the boxes on screen. A tab or mode change drops it, so old text cannot set a hint.
 function dropClockText(s){for(const k of Object.keys(s))if(/Clock$/.test(k))delete s[k];}
-function editAction(arg){const e=[...S.entries,...S.upcomingAppointments].find(x=>String(x.id)===String(arg));if(e){const c=clockOf(e.t),sides=e.sideAmounts||{};S.sheet=S.drafts.edit?.id===e.id?S.drafts.edit:{kind:'edit',id:e.id,editDate:dayISO(dayOf(e.t)),...c,...editEnd(e),...loadedEdit(e),editNote:e.type==='note'?(e.text||''):(e.note||''),editTitle:e.title||'',valueTitle:e.title||'',valueProvider:e.provider||'',valueLocation:e.location||'',valueReason:e.reason||'',valueObservations:e.observations||'',valueInstructions:e.instructions||'',valueWeightKg:e.weightKg??'',valueLengthCm:e.lengthCm??'',valueHeadCm:e.headCm??'',valueFollowUp:e.followUpDate||'',valueSide:e.side,valueDur:e.dur,valueNap:e.nap,valueCompleted:e.completed,valueFood:e.food||'',valueAmount:e.amount??'',valueMl:e.ml,valueLeftMl:sides.L??e.leftMl??'',valueRightMl:sides.R??e.rightMl??'',valueMilk:e.milk,valueKind:e.kind,valueTex:e.tex,valueCol:e.col,valueName:e.name,valueDose:e.dose,valueUnit:e.unit,valueTempUnit:DEFU.temp(unitsOf()),valueTemp:e.c!=null?String(S.units[S.me]==='us'?c2f(e.c):e.c):'',valueKg:e.kg??'',valueCm:e.cm??'',valueHead:e.head??'',valueRecipient:e.recipient,valueWhat:e.what,valueEnabled:e.enabled,valueDate:dayISO(e.day??dayOf(e.t)),valueHour:String(e.hour||12),valueMinute:pad(e.minute||0),valuePeriod:e.period||'AM',photo:e.photo,photoName:e.photoName};}delete S.drafts.edit;}
+function editAction(arg){const e=findEntry(arg);if(e){const c=clockOf(e.t),sides=e.sideAmounts||{},editDate=dayISO(dayOf(e.t));S.sheet=S.drafts.edit?.id===e.id?S.drafts.edit:{kind:'edit',id:e.id,editDate,...c,...editEnd(e),...loadedEdit(e),loadedTime:e.type==='med'&&e.timeISO?{date:editDate,hh:c.hh,mm:c.mm,period:c.period,timeISO:e.timeISO}:null,editNote:e.type==='note'?(e.text||''):(e.note||''),editTitle:e.title||'',valueTitle:e.title||'',valueProvider:e.provider||'',valueLocation:e.location||'',valueReason:e.reason||'',valueObservations:e.observations||'',valueInstructions:e.instructions||'',valueWeightKg:e.weightKg??'',valueLengthCm:e.lengthCm??'',valueHeadCm:e.headCm??'',valueFollowUp:e.followUpDate||'',valueSide:e.side,valueDur:e.dur,valueNap:e.nap,valueCompleted:e.completed,valueFood:e.food||'',valueAmount:e.amount??'',valueMl:e.ml,valueLeftMl:sides.L??e.leftMl??'',valueRightMl:sides.R??e.rightMl??'',valueMilk:e.milk,valueKind:e.kind,valueTex:e.tex,valueCol:e.col,valueName:e.name,valueDose:e.dose,valueUnit:e.unit,valueNext:e.next!=null?String(e.next):'',valueTempUnit:DEFU.temp(unitsOf()),valueTemp:e.c!=null?String(S.units[S.me]==='us'?c2f(e.c):e.c):'',valueKg:e.kg??'',valueCm:e.cm??'',valueHead:e.head??'',valueRecipient:e.recipient,valueWhat:e.what,valueEnabled:e.enabled,valueDate:validDate(e.day)?e.day:editDate,valueHour:String(e.hour||12),valueMinute:pad(e.minute||0),valuePeriod:e.period||'AM',photo:e.photo,photoName:e.photoName};if(e.type==='reminder')void LittleDaysAlertsUI.refresh(render);}delete S.drafts.edit;}
 function sheetAction(a,arg){const s=S.sheet;switch(a){
     case 'split':openSplit(s);break;
     case 'ftab':{const was=allowsZeroLength(s);if(s.early==='switch')s.early=null;s.tab=arg;dropClockText(s);resetRangeOnTab(s,was);break;}
@@ -2706,7 +2736,25 @@ function factAction(a,arg){
   }
   return false;
 }
-function act(a,arg){if(a.startsWith('cry-')&&LittleDaysCryUI.handle(a,arg))return;if(a.startsWith('report-')&&LittleDaysReportsUI.handle(a,arg))return;if(a.startsWith('extras-')&&LittleDaysExtrasUI.handle(a,arg))return;const s=S.sheet;if(S.busy&&!BUSY_OK.has(a))return;
+async function toggleReminderInline(id){
+  const r=findEntry(id);if(!r||r.type!=='reminder'||S.busy)return;
+  const body={recipient:r.recipient,what:r.what,scheduledAt:r.scheduledAt,enabled:!r.enabled},op=crypto.randomUUID();
+  S.busy=true;S.message='';render();
+  try{await acceptWrite(await LittleDaysAPI.writes.saveReminder(r.id,body,op),()=>t('saved'),{close:false,operationOwner:{}});}
+  catch(error){await recoverWrite(error,()=>t('saved'),{close:false,operationOwner:{},retry:()=>toggleReminderInline(id)});}
+  finally{S.busy=false;render();}
+}
+function alertHooks(){
+  return {
+    lang:S.lang,prefs:S.preferences,render,
+    reloadState:async()=>{const next=await LittleDaysAPI.state();applyServerData(next,true);render();},
+    saveAlertPrefs:alerts=>persistPreferences({lang:S.lang,units:unitsOf(),palette:S.pal,night:S.night,alerts}),
+    toggleReminder:toggleReminderInline,
+    deleteReminder:id=>removeEntry({id},null,{label:()=>t('deleted')}),
+    setSheetField:(k,v)=>{if(S.sheet){S.sheet[k]=v;S.sheet.dirty=true;render();}},
+  };
+}
+function act(a,arg){if(a.startsWith('cry-')&&LittleDaysCryUI.handle(a,arg))return;if(a.startsWith('report-')&&LittleDaysReportsUI.handle(a,arg))return;if(a.startsWith('extras-')&&LittleDaysExtrasUI.handle(a,arg))return;if(a.startsWith('alerts-')&&LittleDaysAlertsUI.handle(a,arg,alertHooks()))return;const s=S.sheet;if(S.busy&&!BUSY_OK.has(a))return;
   if((a.startsWith('open-')||a==='quick')&&!S.retryAction&&!Object.keys(S.pendingOps||{}).length)S.message='';
   if(a==='quick'&&arg==='solids')queueMicrotask(()=>loadFoods());
   if(stopGate(a)||feedbackAction(a,arg)||factAction(a,arg))return;
@@ -2950,18 +2998,19 @@ const SAVE_VALIDATORS={
   diaper:s=>!!s.type&&pointTimeOk(s),
   appointment:s=>!!s.title?.trim()&&validEventDateTime(s)&&startMinutes(s.date,s.hour,s.minute,s.period)>nowM(),
   visit:s=>!!(s.provider||s.reason||s.observations||s.instructions||s.weightKg!==''||s.lengthCm!==''||s.headCm!=='')&&validEventDateTime(s)&&startMinutes(s.date,s.hour,s.minute,s.period)<=nowM(),
-  med:s=>!!s.name?.trim()&&positive(s.dose)&&['mg','ml','tablets','drops'].includes(s.unit)&&validEventDateTime(s),
+  med:s=>!!s.name?.trim()&&positive(s.dose)&&['mg','ml','tablets','drops'].includes(s.unit)&&LittleDaysAlertsUI.validMedNext(s.next)&&validEventDateTime(s),
   temp:s=>validNumber(s.temperature)&&Number.isFinite(s.c)&&s.c>=0&&validEventDateTime(s),
   growth:s=>[s.weight,s.length,s.head].some(positive)&&[s.weight,s.length,s.head].every(v=>v===''||positive(v))&&growthDateOk(s),
   quick:s=>s.what==='solids'?!!s.food?.trim()&&(!s.amount||validNumber(s.amount))&&pointTimeOk(s):s.what==='tummy'||s.what==='bath'?s.completed?validPointTime(s,'manualDate','hour','minute','period'):validDurationRange(s,'manualDate','hour','minute','period','duration'):!!s.moment?.trim()&&pointTimeOk(s),
   handoff:s=>!!s.text?.trim(),
-  reminder:s=>!!s.enabled&&validEventDateTime(s),
-  edit:s=>validEdit([...S.entries,...S.upcomingAppointments].find(e=>e.id===s.id),s)
+  reminder:s=>s.recipient===personName(S.me)&&validEventDateTime(s),
+  edit:s=>validEdit(findEntry(s.id),s)
 };
 function hasUnresolvedSheet(sheet){return Object.values(S.pendingOps||{}).some(op=>op.context?.sheet===sheet);}
 function updateSaveState(s){const yes=(SAVE_VALIDATORS[s.kind]?.(s)??true)&&!S.busy&&!S.photoBusy&&(!S.pendingSheetOperation||S.retrySame===s)&&(!hasUnresolvedSheet(s)||S.retrySame===s),b=$('.sh-foot [data-act="save"]');if(b){const on=yes||b.hasAttribute('data-always');b.disabled=!on;if(on)b.removeAttribute('aria-disabled');else b.setAttribute('aria-disabled','true');}const h=$('[data-save-hint]');if(h&&(b||s.kind==='diaper')&&!b?.hasAttribute('data-always')){const msg=saveHint(s);h.hidden=!msg;h.textContent=msg;}const err=$('[data-range-err]');if(err)err.hidden=!rangeLate(s);const correctionError=document.querySelector('[data-correction-error]');if(correctionError){correctionError.hidden=validCorrection(s);correctionError.textContent=correctionHint(s);}document.querySelectorAll('[data-sheet] .sleep-start').forEach(button=>{button.disabled=!yes;});if(S.run?.side==='bottle')document.querySelectorAll('[data-sheet] [data-act="switch"],[data-sheet] [data-act="stop"]').forEach(button=>{button.disabled=!bottleAmountOk(s)||S.busy||!!S.pendingSheetOperation||hasUnresolvedSheet(s);});const eh=$('[data-early-hint]');if(eh){const msg=earlyHint(s);eh.hidden=!msg;eh.textContent=msg;}}
 function updateInput(id,value){if(id==='valueCol'){const w=$('[data-col-warn]');if(w)w.innerHTML=colWarn(value);}
-  const map={appointmentTitle:'title',appointmentProvider:'provider',appointmentLocation:'location',appointmentDate:'date',appointmentNote:'note',visitProvider:'provider',visitReason:'reason',visitDate:'date',visitObservations:'observations',visitInstructions:'instructions',visitWeight:'weightKg',visitLength:'lengthCm',visitHead:'headCm',visitFollowUp:'followUpDate',editAppointmentTitle:'valueTitle',editAppointmentProvider:'valueProvider',editAppointmentLocation:'valueLocation',editObservations:'valueObservations',editInstructions:'valueInstructions',editVisitProvider:'valueProvider',editVisitReason:'valueReason',editWeightKg:'valueWeightKg',editLengthCm:'valueLengthCm',editHeadCm:'valueHeadCm',editFollowUp:'valueFollowUp',eventNote:'note',manualDate:'manualDate',manualDuration:'manualDuration',note:'text',text:'text',food:'food',amount:'amount',editFood:'valueFood',editAmount:'valueAmount',editDuration:'valueDur',duration:'duration',moment:'moment',name:'name',dose:'dose',unit:'unit',next:'next',medDate:'date',tempDate:'date',temperature:'temperature',weight:'weight',length:'length',head:'head',recipient:'recipient',remindDay:'date',remindWhat:'what',reminderDate:'valueDate',tempNote:'tempNote',medNote:'note',editDay:'editDate',editNote:'editNote',editTitle:'editTitle',editRecipient:'valueRecipient',editWhat:'valueWhat',photo:'photo',valueDur:'valueDur',valueMl:'valueMl',valueLeftMl:'valueLeftMl',valueRightMl:'valueRightMl',valueTex:'valueTex',valueCol:'valueCol',valueName:'valueName',valueDose:'valueDose',valueUnit:'valueUnit',valueTemp:'valueTemp',valueKg:'valueKg',valueCm:'valueCm',valueHead:'valueHead',correctDate:'date',careStart:'careStart',careEnd:'careEnd'};const cm={appointmentHour:'hour',appointmentMinute:'minute',appointmentPeriod:'period',visitHour:'hour',visitMinute:'minute',visitPeriod:'period',medHour:'hour',medMinute:'minute',medPeriod:'period',earlyHour:'earlyHour',earlyMinute:'earlyMinute',earlyPeriod:'earlyPeriod',manualHour:'hour',manualMinute:'minute',manualPeriod:'period',manualEndHour:'endHour',manualEndMinute:'endMinute',manualEndPeriod:'endPeriod',editEndHour:'valueEndHour',editEndMinute:'valueEndMinute',editEndPeriod:'valueEndPeriod',remindHour:'hour',remindMinute:'minute',remindPeriod:'period',reminderEditHour:'valueHour',reminderEditMinute:'valueMinute',reminderEditPeriod:'valuePeriod',editHour:'hh',editMinute:'mm',editPeriod:'period',tempHour:'hour',tempMinute:'minute',tempPeriod:'period',correctHour:'hour',correctMinute:'minute',correctPeriod:'period'};S.sheet[cm[id]||map[id]||id]=value;
+  const map={appointmentTitle:'title',appointmentProvider:'provider',appointmentLocation:'location',appointmentDate:'date',appointmentNote:'note',visitProvider:'provider',visitReason:'reason',visitDate:'date',visitObservations:'observations',visitInstructions:'instructions',visitWeight:'weightKg',visitLength:'lengthCm',visitHead:'headCm',visitFollowUp:'followUpDate',editAppointmentTitle:'valueTitle',editAppointmentProvider:'valueProvider',editAppointmentLocation:'valueLocation',editObservations:'valueObservations',editInstructions:'valueInstructions',editVisitProvider:'valueProvider',editVisitReason:'valueReason',editWeightKg:'valueWeightKg',editLengthCm:'valueLengthCm',editHeadCm:'valueHeadCm',editFollowUp:'valueFollowUp',eventNote:'note',manualDate:'manualDate',manualDuration:'manualDuration',note:'text',text:'text',food:'food',amount:'amount',editFood:'valueFood',editAmount:'valueAmount',editDuration:'valueDur',duration:'duration',moment:'moment',name:'name',dose:'dose',unit:'unit',next:'next',valueNext:'valueNext',medDate:'date',tempDate:'date',temperature:'temperature',weight:'weight',length:'length',head:'head',recipient:'recipient',remindDay:'date',remindWhat:'what',reminderDate:'valueDate',tempNote:'tempNote',medNote:'note',editDay:'editDate',editNote:'editNote',editTitle:'editTitle',editRecipient:'valueRecipient',editWhat:'valueWhat',photo:'photo',valueDur:'valueDur',valueMl:'valueMl',valueLeftMl:'valueLeftMl',valueRightMl:'valueRightMl',valueTex:'valueTex',valueCol:'valueCol',valueName:'valueName',valueDose:'valueDose',valueUnit:'valueUnit',valueTemp:'valueTemp',valueKg:'valueKg',valueCm:'valueCm',valueHead:'valueHead',correctDate:'date',careStart:'careStart',careEnd:'careEnd'};const cm={appointmentHour:'hour',appointmentMinute:'minute',appointmentPeriod:'period',visitHour:'hour',visitMinute:'minute',visitPeriod:'period',medHour:'hour',medMinute:'minute',medPeriod:'period',earlyHour:'earlyHour',earlyMinute:'earlyMinute',earlyPeriod:'earlyPeriod',manualHour:'hour',manualMinute:'minute',manualPeriod:'period',manualEndHour:'endHour',manualEndMinute:'endMinute',manualEndPeriod:'endPeriod',editEndHour:'valueEndHour',editEndMinute:'valueEndMinute',editEndPeriod:'valueEndPeriod',remindHour:'hour',remindMinute:'minute',remindPeriod:'period',reminderEditHour:'valueHour',reminderEditMinute:'valueMinute',reminderEditPeriod:'valuePeriod',editHour:'hh',editMinute:'mm',editPeriod:'period',tempHour:'hour',tempMinute:'minute',tempPeriod:'period',correctHour:'hour',correctMinute:'minute',correctPeriod:'period'};S.sheet[cm[id]||map[id]||id]=value;
+  if(id==='next'||id==='valueNext'){const bad=!LittleDaysAlertsUI.validMedNext(value),wrap=$('[data-med-next-wrap]'),err=$('[data-med-next-err]');if(wrap)wrap.classList.toggle('bad',bad);if(err)err.hidden=!bad;}
   // Fields update in place: a full render while typing would steal focus after the first digit.
   // Until a date or time is typed, an untouched range saves at the time of the tap.
   if(/Clock$/.test(id))readClock(id.slice(0,-5),value,{...cm,wokeHour:'wokeHour',wokeMinute:'wokeMinute',wokePeriod:'wokePeriod',sleptHour:'sleptHour',sleptMinute:'sleptMinute',sleptPeriod:'sleptPeriod'});
