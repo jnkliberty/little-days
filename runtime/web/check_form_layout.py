@@ -9,7 +9,7 @@ iOS-native date boxes cannot be drawn here: the CSS (appearance none, 100% width
 """
 from datetime import datetime
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 from check_support import launch_browser, open_app, start_static_server
 from check_stop_bar import Touchy
 
@@ -33,6 +33,16 @@ MEASURE = """() => {
   const top = document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2);
   return {bad, cover: !(top && (top === save || save.contains(top))), inView: s.top >= 0 && s.bottom <= innerHeight && s.left >= 0 && s.right <= vw, enabled: !save.disabled,
     pinned: Math.abs(initial.top - s.top) < 1, fieldClear: !last || last.getBoundingClientRect().bottom <= sheet.querySelector('.sh-foot').getBoundingClientRect().top};
+}"""
+
+FOCUSED_NOTE = """() => {
+  const e=document.querySelector('[data-fid="eventNote"]'), sheet=e.closest('[data-sheet]');
+  const field=e.getBoundingClientRect(), save=sheet.querySelector('[data-act="save"]').getBoundingClientRect();
+  const content=sheet.querySelector('.wrap'), contentTop=content.getBoundingClientRect().top;
+  const footerTop=sheet.querySelector('.sh-foot').getBoundingClientRect().top;
+  return {focused:e===document.activeElement, fieldTop:field.top, fieldBottom:field.bottom,
+    contentTop, footerTop, saveBottom:save.bottom, viewport:innerHeight, scrollTop:content.scrollTop,
+    clear:e===document.activeElement && field.top>=contentTop && field.bottom<=footerTop && save.bottom<=innerHeight};
 }"""
 
 
@@ -100,12 +110,13 @@ def main():
                     fill(page, 'breast')
                     note = page.locator('[data-fid="eventNote"]')
                     note.focus()
-                    check(f'{lang} 320x480 focused Note: Save stays visible and the field clears its bar', note.evaluate('''e => {
-                      const sheet=e.closest('[data-sheet]'), field=e.getBoundingClientRect();
-                      const save=sheet.querySelector('[data-act="save"]').getBoundingClientRect();
-                      return e===document.activeElement && field.top>=sheet.querySelector('.wrap').getBoundingClientRect().top &&
-                        field.bottom<=sheet.querySelector('.sh-foot').getBoundingClientRect().top && save.bottom<=innerHeight;
-                    }'''))
+                    # WebKit scrolls a focused field into view after focus() returns.
+                    try:
+                        page.wait_for_function(f'() => ({FOCUSED_NOTE})().clear', timeout=4000)
+                    except PlaywrightTimeoutError:
+                        pass
+                    focused = page.evaluate(FOCUSED_NOTE)
+                    check(f'{lang} 320x480 focused Note: Save stays visible and the field clears its bar ({focused})', focused['clear'])
                     page.evaluate("() => {S.sheet=null;render();act('open-med');render()}")
                     check(f'{lang} 320x480: the disabled Save hint is left aligned and visible', page.locator('.sh-foot [data-save-hint]').evaluate("e=>!e.hidden && getComputedStyle(e).textAlign === 'left' && e.getBoundingClientRect().top >= 0 && e.getBoundingClientRect().bottom <= innerHeight"))
                     page.context.close()
