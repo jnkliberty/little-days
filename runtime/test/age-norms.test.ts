@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 
 // "Is this normal?" (plan 2026-11-21, Group 2; look A approved by owner 2026-11-22). Every range must be a row of the table
 // the owner approved at STOP 0 (research/2026-11-21-age-norms.md), cut by the answers of 2026-11-21.
@@ -35,13 +34,4 @@ test('place: below, inside or above; an "at least" row has no above', () => {
   assert.deepEqual([7.4, 8, 12, 12.1].map(v => place(v, feeds)), ['below', 'inside', 'inside', 'above']);
   assert.deepEqual([4.9, 5, 9].map(v => place(v, wet)), ['below', 'inside', 'inside']);
   assert.equal(place(14, normFor('sleepHours', 30)), null);
-});
-
-test('every row quotes a URL and figures of the approved table', () => {
-  const table = readFileSync(new URL('../../research/2026-11-21-age-norms.md', import.meta.url), 'utf8');
-  const {ROWS} = (globalThis as any).LittleDaysAgeNorms;
-  for (const row of ROWS) for (const s of row.sources) {
-    const line = table.split('\n').find(l => l.includes(`| ${s.url} |`) && l.includes(s.quote));
-    assert.ok(line, `${row.metric} ${s.url}: no approved row with this quote`);
-  }
 });

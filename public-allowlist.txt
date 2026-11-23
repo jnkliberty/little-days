@@ -34,3 +34,4 @@ runtime/server/
 runtime/web/
 runtime/test/
 !runtime/test/LIVE-SMOKE.md
+!runtime/test/editorial-provenance.test.ts
