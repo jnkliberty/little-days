@@ -22,7 +22,6 @@ globalThis.LittleDaysReportsUI = (() => {
     backCharts: ['Charts', 'Gráficas'],
     backHome: ['Home', 'Inicio'],
     weekReady: ['Her week is ready', 'Su semana está lista'],
-    weekReadyDefault: [range => `Weekly summary for ${range}.`, range => `Resumen semanal del ${range}.`],
     weekHomeSummary: [(s, f) => `${s} sleep and ${f} feeds a day.`, (s, f) => `${s} de sueño y ${f} tomas al día.`],
     weekHomeSleepOnly: [s => `${s} sleep a day.`, s => `${s} de sueño al día.`],
     weekHomeFeedsOnly: [f => `${f} feeds a day.`, f => `${f} tomas al día.`],
@@ -125,6 +124,7 @@ globalThis.LittleDaysReportsUI = (() => {
     emptyDoctor: ['No records logged in this period.', 'No hay registros en este periodo.'],
     emptyHint: ['Records appear here once you log them on Home.', 'Los registros aparecen aquí cuando los agrega en Inicio.'],
     backToCharts: ['Back to Charts', 'Volver a Gráficas'],
+    backToHome: ['Back to Home', 'Volver a Inicio'],
     errTitle: ['Some days did not load', 'Algunos días no cargaron'],
     errBody: ['Some days could not load. Averages stay hidden until every day loads so no number is smaller than it is.', 'Algunos días no pudieron cargar. Los promedios se ocultan hasta cargar todos los días para no mostrar un promedio menor.'],
     tryAgain: ['Try again', 'Reintentar'],
@@ -285,28 +285,28 @@ globalThis.LittleDaysReportsUI = (() => {
   }
 
   /* ---------- Home Monday card ("Her week is ready") ---------- */
-  function homeSummaryText(today, nowMin, curRange) {
+  function homeSummaryText(today, nowMin) {
     const p = permissions();
     const weekDates = Array.from({length: 9}, (_, i) => shiftISO(today, -8 + i));
     const haveAll = weekDates.every(d => homeReads.has(d));
-    if (!haveAll) return tr('weekReadyDefault', curRange);
+    if (!haveAll) return '';
     const rep = RP().weeklyReport({entries: homeEntries(today), growthEntries: [], todayISO: today, nowMin, birthDate: S.child?.birthDate, permissions: p});
     const sleep = p.sleep && rep.averages.sleepMin != null ? fmtDur(rep.averages.sleepMin) : null;
     const feeds = p.feedings && rep.averages.feeds != null ? fmt1(rep.averages.feeds) : null;
     if (sleep && feeds) return tr('weekHomeSummary', sleep, feeds);
     if (sleep) return tr('weekHomeSleepOnly', sleep);
     if (feeds) return tr('weekHomeFeedsOnly', feeds);
-    return tr('weekReadyDefault', curRange);
+    return '';
   }
 
   function homeCardHTML() {
     const today = todayISO(), nowMin = nowM();
     if (!RP().weeklyCardReady({todayISO: today, nowMin, dismissedDate: getDismissed(), canViewWeekly: canView('weekly')})) return '';
     const curRange = rangeLabel(shiftISO(today, -7), shiftISO(today, -1));
-    const summary = homeSummaryText(today, nowMin, curRange);
+    const summary = homeSummaryText(today, nowMin);
     return `<section class="card rp-home t-plain" data-rp-home aria-labelledby="rp-home-h">`
       + `<div class="rp-home-top">${chartBlock()}<div><h2 id="rp-home-h">${esc(tr('weekReady'))}</h2><p class="sub">${esc(curRange)}</p></div></div>`
-      + `<p class="rp-home-summary">${esc(summary)}</p>`
+      + (summary ? `<p class="rp-home-summary">${esc(summary)}</p>` : '')
       + `<div class="rp-home-actions"><button type="button" class="back" data-act="report-open" data-arg="weekly">${esc(tr('openReport'))}</button><button type="button" class="textlink" data-act="report-dismiss">${esc(tr('dismiss'))}</button></div>`
       + `</section>`;
   }
@@ -344,7 +344,7 @@ globalThis.LittleDaysReportsUI = (() => {
   }
 
   function emptyCard(msgKey) {
-    return `<section class="card"><div class="empty-state"><p><strong>${esc(tr(msgKey))}</strong></p><p class="sub">${esc(tr('emptyHint'))}</p><button type="button" class="back" data-act="report-close">${esc(tr('backToCharts'))}</button></div></section>`;
+    return `<section class="card"><div class="empty-state"><p><strong>${esc(tr(msgKey))}</strong></p><p class="sub">${esc(tr('emptyHint'))}</p><button type="button" class="back" data-act="report-close">${esc(tr(R.backTo === 'home' ? 'backToHome' : 'backToCharts'))}</button></div></section>`;
   }
 
   function errorCard() {
@@ -605,7 +605,7 @@ globalThis.LittleDaysReportsUI = (() => {
     const dayList = dayItems ? `<section class="card"><h2>${esc(tr('dayByDay'))}</h2><p class="sub" style="margin-bottom:12px">${esc(tr('dayByDaySub', days))}</p><div class="rp-day-list">${dayItems}</div></section>` : '';
     const actions = `<div class="rp-actions"><button type="button" class="btn-primary" data-act="report-print">${esc(tr('printReport'))}</button><a class="back" href="${esc(rep.exportUrl)}" download="little-days.csv" data-act="report-csv">${esc(tr('downloadCsv'))}</a></div>`;
     if (!avgs && !growth && !rep.medicines.length && !dayItems) return sheetWrap(tr('doctorTitle'), head + emptyCard('emptyDoctor'));
-    return sheetWrap(tr('doctorTitle'), head + avgs + growth + meds + dayList + actions);
+    return sheetWrap(tr('doctorTitle'), head + actions + avgs + growth + meds + dayList);
   }
 
   /* ---------- open / close / actions ---------- */

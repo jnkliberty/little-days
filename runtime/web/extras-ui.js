@@ -317,7 +317,7 @@ globalThis.LittleDaysExtrasUI = (() => {
 
   /* ---------- Photos Timelapse card (Option A, approved 2026-11-22) ---------- */
   function photosCardHTML() {
-    if (!resourceAllowed('notes') || X.photosState !== 'ok' || !X.photos.length) return '';
+    if (!resourceAllowed('notes') || X.photosState !== 'ok' || X.photos.length < 2) return '';
     const first = X.photos[0].iso, last = X.photos[X.photos.length - 1].iso;
     const sub = tr('tlCountRange', X.photos.length, rangeLabel(first, last));
     return `<section class="card tl-card t-plain" data-tl-entry aria-labelledby="tl-entry-h">`

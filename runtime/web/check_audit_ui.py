@@ -158,14 +158,14 @@ def audit_photos_selection(browser, base):
     page = open_page(browser, base, entries=[photo("notes:1", -20), photo("notes:3", -5), photo("notes:2", -35)])
     big = lambda: page.locator(".pbig img").get_attribute("alt")  # noqa: E731
     tab(page, "photos")
-    check(f"opening Photos shows the newest photo large ({big()!r})", big() == "notes:3.png")
+    check(f"opening Photos shows the newest photo large ({big()!r})", big() == "Photo notes:3")
     page.locator("[data-act='photo'][data-arg='0']").click()
     page.locator("[data-act='photos-older']").click()
     settle(page)
-    check(f"Load older keeps the selected photo ({big()!r} after picking the first thumbnail)", big() == "notes:1.png")
+    check(f"Load older keeps the selected photo ({big()!r} after picking the first thumbnail)", big() == "Photo notes:1")
     tab(page, "home")
     tab(page, "photos")
-    check(f"opening Photos again shows the newest photo ({big()!r})", big() == "notes:3.png")
+    check(f"opening Photos again shows the newest photo ({big()!r})", big() == "Photo notes:3")
     done(page)
 
 

@@ -193,6 +193,9 @@ def check_older_only_and_reduce_motion(browser, base):
           'Auto-play is off (Reduce Motion).' in p.locator('.tl-rm-note').inner_text()
           and 'Play' in toggle.inner_text()
           and toggle.is_disabled())
+    # The player focuses Close on its next frame. Space must target the player shortcut.
+    p.wait_for_function("document.activeElement?.dataset.act === 'extras-tl-close'")
+    p.locator('[data-act="extras-tl-close"]').evaluate('el => el.blur()')
     p.keyboard.press(' ')
     p.wait_for_timeout(1500)
     check('Reduce Motion: Space and 1.5 s wait keep Play label on 1 of 4',
@@ -223,18 +226,17 @@ def check_edge_states_and_permissions(browser, base):
           p.locator('[data-tl-entry]').count() == 0 and len(list_calls) == 0 and not p.errors)
     p.context.close()
 
-    # 1 photo -> all 3 transport controls disabled
+    # A single older photo is still discoverable through the gallery.
     one = make_photo_pages(count=1)
     p, _, _, _, _ = setup_photos_page(browser, base, {0: {'photos': one, 'nextOffset': None}}, recent_photo=False)
     p.click('[data-act="tab"][data-arg="photos"]')
-    p.locator('[data-tl-entry]').wait_for()
-    p.click('[data-act="extras-tl-open"]')
-    p.locator('.tl-player .tl-img').wait_for()
-    check('1-photo state: shows 1 of 1 with Previous, Play, Next disabled',
-          '1 of 1' in p.locator('.tl-count').inner_text()
-          and p.locator('[data-act="extras-tl-prev"]').is_disabled()
-          and p.locator('[data-act="extras-tl-toggle"]').is_disabled()
-          and p.locator('[data-act="extras-tl-next"]').is_disabled())
+    p.get_by_text('No photos in the last 31 days.', exact=True).wait_for()
+    check('One older photo hides Play', p.locator('[data-tl-entry]').count() == 0)
+    p.st['entries'].append({'id': 'notes:old', 'type': 'note', 'title': 'Note', 'text': 'Older smile',
+                            't': -40 * 1440, 'by': 'Rowan', 'photo': one[0]['url']})
+    p.click('[data-act="photos-older"]')
+    p.locator('.pcap').get_by_text('Older smile', exact=True).wait_for()
+    check('Load older shows the single photo in the gallery', p.locator('.pbig img').is_visible())
     p.context.close()
 
     # Broken image -> alert + Try again recovers

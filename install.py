@@ -2,7 +2,7 @@
 """Install Little Days on one computer with Docker. Run it from this folder: python3 install.py
 
 It asks for the adults (a name and a role each), a household passcode, the child, the app address, and the
-time zone. Then it runs 7 steps in order and stops at the first failure. Answers can also come from standard
+time zone. Then it runs 8 steps in order and stops at the first failure. Answers can also come from standard
 input, one line each, in the order they are asked (see sample/answers.txt).
 """
 import getpass
@@ -39,10 +39,16 @@ class StepError(Exception):
 
 
 def origin_parts(origin: str) -> tuple[str, int]:
-    parsed = urlparse(origin.strip())
+    try:
+        parsed = urlparse(origin.strip())
+        port = parsed.port
+    except ValueError:
+        raise AnswerError("Use a valid host name and a port from 1 to 65535.") from None
+    if port == 0:
+        raise AnswerError("Use a port from 1 to 65535.")
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
         raise AnswerError("The address must start with https:// and hold only a host name and an optional port, such as https://localhost")
-    return parsed.hostname, parsed.port or 443
+    return parsed.hostname, port or 443
 
 
 def normalize_origin(origin: str) -> str:

@@ -219,7 +219,8 @@ select.field{height:56px}
 .pth[aria-pressed=true]{border-color:var(--ink);border-width:3px}
 .pth svg{display:block;width:100%;height:auto}
 .pth img{aspect-ratio:4/3;object-fit:cover}
-.pcap{font-weight:700;margin-top:8px}
+.pcap{font-weight:700;margin-top:8px;overflow-wrap:anywhere}
+.pcap summary{cursor:pointer}
 
 @media (max-width:360px){
   .run .t{font-size:var(--fs-h1)}
@@ -373,7 +374,7 @@ html[data-theme=dim] .fact-fill{background:var(--ink)}
 .sh-foot{flex:none;display:grid;gap:4px;padding:8px 16px calc(12px + env(safe-area-inset-bottom,0px));background:var(--card);border-top:1px solid var(--hair)}
 .sh-foot>.btn{min-height:56px;width:100%;font-size:18px}
 .sh-foot .save-hint,.save-hint{margin:0;border-radius:16px}
-.sh-foot .save-hint{padding:0;background:none;font-size:14px;line-height:20px;text-align:center}
+.sh-foot .save-hint{padding:0;background:none;font-size:14px;line-height:20px;text-align:left}
 .bsheet>.save-hint{margin:0 16px 8px}
 
 /* Empty states and card headings (DESIGN.md): a drawn icon above one sentence; a card heading is an 18 px bold h2 at line height 1.2. */
@@ -494,6 +495,9 @@ html[data-theme=dim] .t-plain .dot{background:var(--ink)}
 .formscreen{touch-action:pan-y pinch-zoom}
 .form-open:has(.form-dragging)>.main{visibility:visible}
 .formscreen>.wrap{min-height:100%;align-content:start}
+.formscreen.with-save{display:flex;flex-direction:column;overflow:hidden}
+.formscreen.with-save>.wrap{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scroll-padding:16px;touch-action:pan-y pinch-zoom}
+.formscreen.with-save>.sh-foot{position:relative;z-index:1}
 .form-open>.main{visibility:hidden}
 .main[inert] .scroll{overflow:hidden}
 .sheet{background:var(--card);border-radius:24px;padding:24px 16px;display:grid;gap:24px;min-width:0}
@@ -524,7 +528,6 @@ html[data-theme=dim] .t-plain .dot{background:var(--ink)}
 .presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .presets .chip{gap:4px;padding:0 4px}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.sheet .sh-foot{display:contents}
 .sheet .save-hint{margin:0 0 -16px;padding:0;background:none;font-size:14px;line-height:20px;text-align:left}
 .btn-primary:disabled,.btn-primary[aria-disabled="true"]{opacity:.45;cursor:default}
 .sheet details{margin:0}
@@ -597,6 +600,10 @@ html[data-theme=dim] .overlay{background:var(--scrim)}
 .nav-row:has(.sub){padding:8px 0}
 .nav-row .conn{display:flex;align-items:center;gap:8px}
 .wrap-settings{display:grid;gap:24px}
+.settings-preferences{display:grid;gap:16px}
+.wrap-settings .settings-preferences .day>h2{padding:0}
+.wrap-settings .settings-preferences .nav-row{border-top:0}
+.settings-preferences [data-night]{display:grid;gap:16px}
 
 .sheet [data-col-warn]:empty{display:none}
 .wrap-settings .day{display:grid;gap:8px}
@@ -788,7 +795,6 @@ html[data-theme=dim] .wk-name{color:var(--c)}
 /* Insight card, from round 2: a long fact stops at 3 lines, and a card with one fact has no arrows, so its link sits closer to the card edge. */
 .insight:not(:has(.fact-navigation)) :is(.fact-actions,.fs-link){margin-bottom:-8px}
 
-.home-first{display:contents}
 @media (min-width:360px){
   .scroll:has(+ .dock>.sleep-stop) .insight{
     padding-block:8px;

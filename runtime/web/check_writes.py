@@ -1034,15 +1034,16 @@ def audit_end_after_start_hint(page, local, entry, sent, mode):
 
 
 def audit_r2_search(page, local, entry, sent, mode):
-    page.evaluate("""() => {
-      S.sheet=null;const feed={...S.entries[0],startISO:'2026-11-08T03:55:10.123Z',endISO:'2026-11-08T04:00:50.456Z',note:'quiet'};
-      S.entries=[feed,{...feed,id:'sleep:42',type:'sleep',nap:true,note:'restful'}];render();
-    }""")
+    # Range responses must return the same entries as the search fixture.
+    feed = {**local['entries'][0], 'startISO': '2026-11-08T03:55:10.123Z', 'endISO': '2026-11-08T04:00:50.456Z', 'note': 'quiet'}
+    local['entries'] = [feed, {**feed, 'id': 'sleep:42', 'type': 'sleep', 'nap': True, 'note': 'restful'}]
+    page.evaluate('(entries) => {S.sheet=null;S.entries=entries;render()}', local['entries'])
     page.locator('[data-act="search-toggle"]').click()  # R5: the search opens from the title bar
     for query in ("start", "end", "iso"):
         page.locator('[data-fid="search"]').fill(query)
         page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
         assert page.locator('.rowedit').count() == 0, f"{query} matched {page.locator('.rowedit').count()} entries through ISO fields"
+    local['entries'][0]['note'] = 'start after bath'
     page.evaluate("() => {S.entries[0].note='start after bath';render();}")
     page.locator('[data-fid="search"]').fill("start")
     page.locator('[data-act="edit"][data-arg="feedings:42"]').wait_for()

@@ -8,6 +8,7 @@ from check_swipe_delete import Touchy
 
 
 def drag(page, dx, dy=0, selector='.form-head h1', cancel=False):
+    page.locator(selector).scroll_into_view_if_needed()
     box = page.locator(selector).bounding_box()
     x = box['x'] + box['width'] * .7
     y = min(400, box['y'] + box['height'] / 2)
@@ -42,7 +43,7 @@ def main():
                 writes = []
                 page.on('request', lambda r: writes.append(r.url) if r.method not in ('GET','HEAD') else None)
                 def opened(action="act('open-feed')"):
-                    page.evaluate("() => {S.sheet=null;S.drafts={};" + action + ";render();document.querySelector('.formscreen').scrollTop=0}")
+                    page.evaluate("() => {S.sheet=null;S.drafts={};" + action + ";render();document.querySelector('.formscreen.with-save>.wrap, .formscreen:not(.with-save)').scrollTop=0}")
                 opened()
                 page.evaluate("""() => {window.actionMoves=[];let origin=0;document.addEventListener('pointerdown',e=>origin=e.clientX);document.addEventListener('pointermove',e=>{if(formDrag?.on)actionMoves.push([e.clientX-origin,new DOMMatrixReadOnly(getComputedStyle(formDrag.node).transform).m41])})}""")
                 drag(page, -120)
@@ -69,7 +70,7 @@ def main():
                 if browser_engine() != 'chromium':
                     page.mouse.wheel(0, 160)
                     page.wait_for_timeout(100)
-                assert page.locator('.formscreen').evaluate('e=>e.scrollTop>0')
+                assert page.locator('.formscreen.with-save>.wrap, .formscreen:not(.with-save)').evaluate('e=>e.scrollTop>0')
                 print('PASS the action still scrolls vertically')
                 opened()
                 page.evaluate('() => {S.busy=true;render()}')

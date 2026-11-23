@@ -25,9 +25,14 @@ MEASURE = """() => {
     if (cs.textAlign !== 'left' && cs.textAlign !== 'start') bad.push([el.dataset.fid || el.id, 'align', cs.textAlign]);
     if (parseFloat(cs.fontSize) < 16) bad.push([el.dataset.fid || el.id, 'font', cs.fontSize]);
   }
-  const save = sheet.querySelector('[data-act="save"]'); save.scrollIntoView({block: 'center'}); const s = save.getBoundingClientRect();
+  const save = sheet.querySelector('[data-act="save"]'), content = sheet.querySelector('.wrap');
+  content.scrollTop = 0; const initial = save.getBoundingClientRect();
+  content.scrollTop = content.scrollHeight; const s = save.getBoundingClientRect();
+  const last = [...content.querySelectorAll('input.field, textarea.field')].filter(el => el.checkVisibility()).at(-1);
+  if (last) last.scrollIntoView({block: 'end'});
   const top = document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2);
-  return {bad, cover: !(top && (top === save || save.contains(top))), inView: s.top >= 0 && s.bottom <= innerHeight && s.left >= 0 && s.right <= vw, enabled: !save.disabled};
+  return {bad, cover: !(top && (top === save || save.contains(top))), inView: s.top >= 0 && s.bottom <= innerHeight && s.left >= 0 && s.right <= vw, enabled: !save.disabled,
+    pinned: Math.abs(initial.top - s.top) < 1, fieldClear: !last || last.getBoundingClientRect().bottom <= sheet.querySelector('.sh-foot').getBoundingClientRect().top};
 }"""
 
 
@@ -81,7 +86,7 @@ def main():
                                     fill(page, tab)
                                     m = page.evaluate(MEASURE)
                                     check(f'{name}: fields inside the card, left-aligned, 16 px ({m["bad"]})', not m['bad'])
-                                    check(f'{name}: Save on screen, not covered, enabled', m['inView'] and not m['cover'] and m['enabled'])
+                                    check(f'{name}: Save stays pinned and visible, fields scroll clear, Save is enabled', m['pinned'] and m['fieldClear'] and m['inView'] and not m['cover'] and m['enabled'])
                                     if details is False:
                                         page.locator('[data-sheet] [data-act="save"]').click()
                                         page.wait_for_function('!document.querySelector("[data-sheet]")', timeout=3000)
@@ -89,6 +94,21 @@ def main():
                                     page.context.close()
                                 except Exception as error:
                                     check(f'{name} completed ({type(error).__name__}: {str(error)[:90]})', False)
+                for lang in ('en', 'es'):
+                    page = open_app(Touchy(browser, **phone), base, 320, 480, AT, lang=lang)
+                    form(page, 'breast', True)
+                    fill(page, 'breast')
+                    note = page.locator('[data-fid="eventNote"]')
+                    note.focus()
+                    check(f'{lang} 320x480 focused Note: Save stays visible and the field clears its bar', note.evaluate('''e => {
+                      const sheet=e.closest('[data-sheet]'), field=e.getBoundingClientRect();
+                      const save=sheet.querySelector('[data-act="save"]').getBoundingClientRect();
+                      return e===document.activeElement && field.top>=sheet.querySelector('.wrap').getBoundingClientRect().top &&
+                        field.bottom<=sheet.querySelector('.sh-foot').getBoundingClientRect().top && save.bottom<=innerHeight;
+                    }'''))
+                    page.evaluate("() => {S.sheet=null;render();act('open-med');render()}")
+                    check(f'{lang} 320x480: the disabled Save hint is left aligned and visible', page.locator('.sh-foot [data-save-hint]').evaluate("e=>!e.hidden && getComputedStyle(e).textAlign === 'left' && e.getBoundingClientRect().top >= 0 && e.getBoundingClientRect().bottom <= innerHeight"))
+                    page.context.close()
             finally:
                 browser.close()
     finally:

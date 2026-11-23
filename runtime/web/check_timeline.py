@@ -78,6 +78,11 @@ def audit_chips(browser, base):
         {"id": "c-tummy", "type": "other", "what": "tummy", "dur": 8, "t": 380, "by": "Sam"},
     ]
     page = timeline_page(browser, base, entries)
+    page.locator('[data-act="tab"][data-arg="home"]').click()
+    page.locator('[data-scroll]').evaluate("el => el.scrollTop = el.scrollHeight")
+    page.locator('[data-act="tab"][data-arg="log"]').click()
+    check("Timeline opens at its filters after scrolling Home",
+          page.locator("[data-scroll]").evaluate("el => el.scrollTop") == 0)
     chips = page.evaluate("[...document.querySelectorAll('.chips .chip')].map(c => [c.dataset.arg, c.textContent.trim(), c.getAttribute('aria-pressed')])")
     check(f"chips are All, Feed, Sleep, Diaper, Other, with All pressed and no filter list: {chips}",
           [c[1] for c in chips] == ["All", "Feed", "Sleep", "Diaper", "Other"] and chips[0][2] == "true" and page.locator("select[data-fid=filter]").count() == 0)

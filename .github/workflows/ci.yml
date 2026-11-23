@@ -30,6 +30,9 @@ jobs:
           python-version: "3.12"
       - name: Install and Baby Buddy script tests
         run: python -m unittest discover -s deploy -p "test*.py"
+      - name: Private export script tests
+        if: ${{ hashFiles('scripts/test_*.py') != '' }}
+        run: python -m unittest discover -s scripts -p "test*.py"
       - name: Compose file is valid
         env:
           LITTLE_DAYS_ORIGIN: https://localhost

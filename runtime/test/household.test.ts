@@ -97,18 +97,33 @@ test('CSV export quotes fields and prefixes formula-leading values', async () =>
   } finally { store.close(); }
 });
 
+test('CSV export formats records with seconds as whole clock minutes across midnight', async () => {
+  const records = { state: async () => ({ today: '2026-10-25', entries: [
+    { t: 60.5, type: 'diaper' },
+    { t: -0.5, type: 'diaper' },
+    { t: 1440.5, type: 'diaper' },
+  ] }) };
+  const household = createHousehold({ store: {} as never, sessions: {} as never, records: records as never });
+  const csv = await household.exportCsv(adult, { from: '2026-10-24', to: '2026-10-27' });
+  assert.match(csv, /"2026-10-25","1:00 AM"/);
+  assert.match(csv, /"2026-10-24","11:59 PM"/);
+  assert.match(csv, /"2026-10-26","12:00 AM"/);
+});
+
 test('new duty handoffs append once and survive a store restart', () => {
   const dir = mkdtempSync(join(tmpdir(), 'little-days-duty-')), path = join(dir, 'store.sqlite');
   let store = openStore(path);
   try {
     store.appendDutyHistory({ operationId: op('11'), who: 'Rowan', note: 'Shift A', adult: 'Sage', occurredAt: '2026-10-25T12:00:00.000Z' });
     store.appendDutyHistory({ operationId: op('11'), who: 'Rowan', note: 'Shift A', adult: 'Sage', occurredAt: '2026-10-25T12:00:00.000Z' });
-    store.appendDutyHistory({ operationId: op('12'), who: 'Sage', note: '', adult: 'Rowan', occurredAt: '2026-10-25T13:00:00.000Z' });
+    store.appendDutyHistory({ operationId: op('12'), who: 'Sage', note: 'Bottle at 2 am', adult: 'Rowan', occurredAt: '2026-10-25T13:00:00.000Z' });
     assert.equal(store.listDutyHistory().length, 2);
     store.close();
     store = openStore(path);
     assert.deepEqual(store.listDutyHistory().map(item => item.who), ['Rowan', 'Sage']);
     assert.equal(store.getSetting('app', 'duty'), 'Sage');
+    assert.equal(store.getSetting('app', 'dutyNote'), 'Bottle at 2 am');
+    assert.equal(store.listDutyHistory()[1].note, 'Bottle at 2 am');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

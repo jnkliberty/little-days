@@ -395,6 +395,31 @@ def audit_settings_content(page):
     page.locator('[data-sheet] [data-act="cancel"]').click()
     page.evaluate("S.sheet=null;render()")
 
+    original_duty = page.evaluate('S.duty')
+    duty_writes = []
+    def save_duty(route):
+        duty_writes.append(route.request.post_data_json)
+        route.fulfill(json={'status': 'saved', 'id': 'duty:test'})
+    page.route('**/api/duty', save_duty)
+    for lang, hint in [('en', 'Choose a different adult to save.'), ('es', 'Elija a otra persona adulta para guardar.')]:
+        page.evaluate("lang=>{S.lang=lang;S.duty='Rowan';act('duty');render()}", lang)
+        save = page.locator('[data-sheet] [data-act="save"]')
+        check(f'Duty {lang}: current adult starts disabled', save.is_disabled())
+        page.locator('[data-sheet] textarea').fill('Bottle at 2 am')
+        check(f'Duty {lang}: an optional note keeps the current adult disabled', save.is_disabled())
+        check(f'Duty {lang}: guidance names the required change', page.locator('[data-save-hint]').inner_text() == hint)
+        page.locator('[data-act="dwho"][data-arg="Sage"]').click()
+        check(f'Duty {lang}: another adult enables Save and retains the note', save.is_enabled() and page.locator('[data-sheet] textarea').input_value() == 'Bottle at 2 am' and page.evaluate('S.sheet.note') == 'Bottle at 2 am')
+        page.locator('[data-act="dwho"][data-arg="Rowan"]').click()
+        check(f'Duty {lang}: returning to the current adult disables Save', save.is_disabled())
+        page.locator('[data-act="dwho"][data-arg="Sage"]').click()
+        save.click()
+        page.wait_for_function("!S.busy && S.sheet?.kind !== 'duty'")
+        check(f'Duty {lang}: save sends the chosen adult and optional note', duty_writes[-1]['who'] == 'Sage' and duty_writes[-1]['note'] == 'Bottle at 2 am')
+        page.evaluate("S.sheet=null;S.drafts={};render()")
+    page.unroute('**/api/duty', save_duty)
+    page.evaluate("duty=>{S.lang='en';S.duty=duty;render()}", original_duty)
+
 
 def audit_more_details(page):
     """R4 (new): a form's More details is closed until it is tapped and then shows Day and Logged by. Fails if it opens by itself or never opens."""
@@ -769,8 +794,7 @@ def audit_look_spacing(browser, base):
             page.reload()
             page.locator('.tile[data-act="open-feed"]').wait_for()
             # The Crying card (DESIGN.md, 2026-11-20) is the one exception: 16 px above it and 16 px below it. It must be there (cryGap is null without it).
-            # .home-first is display:contents (no box of its own), so its children are the groups to measure.
-            gaps = page.evaluate("""() => { const els = [...document.querySelector('.wrap').children].flatMap(e => getComputedStyle(e).display === 'contents' ? [...e.children] : [e]), kids = els.map(e => e.getBoundingClientRect());
+            gaps = page.evaluate("""() => { const els = [...document.querySelector('.wrap').children], kids = els.map(e => e.getBoundingClientRect());
                 const tiles = [...document.querySelectorAll('.tiles .tile')].map(e => e.getBoundingClientRect()), cry = document.querySelector('.cry-home');
                 const cryGap = cry ? Math.round(cry.lastElementChild.getBoundingClientRect().top - cry.firstElementChild.getBoundingClientRect().bottom) : null;
                 return {between: kids.slice(1).map((b, i) => Math.round(b.top - kids[i].bottom)), want: kids.slice(1).map((b, i) => els[i].classList.contains('cry-home') ? 16 : 24),

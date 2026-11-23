@@ -4,6 +4,7 @@ Invented data only; all API calls are mocked locally. Each check names the failu
 """
 import re
 import sys
+from base64 import urlsafe_b64encode
 from datetime import date, datetime, timedelta
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -16,7 +17,9 @@ FAIL = 0
 AT = datetime.fromisoformat("2026-11-10T10:00:00-06:00")
 TODAY = date(2026, 11, 10)
 RESOURCES = ["feedings", "changes", "sleep", "pumping", "medication", "weight", "height", "head-circumference", "children", "timers", "notes"]
-VAPID_PUB = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"
+# The push mock checks the encoded shape and byte count, without using real cryptographic keys.
+VAPID_PUB = urlsafe_b64encode(bytes([4]) + bytes(range(64))).decode().rstrip('=')
+PUSH_AUTH = urlsafe_b64encode(b'fake-push-auth!!').decode().rstrip('=')
 STATE_RE = re.compile(r"/api/state(\?.*)?$")
 
 
@@ -57,7 +60,7 @@ def install_push_mock(page, permission="default", existing_endpoint=None):
     page.add_init_script(f"""(() => {{
       window.__pushLog = {{ perms: 0, registered: [], subscribed: [], unsubscribed: 0 }};
       let perm = {permission!r};
-      let currentSub = {('null' if not existing_endpoint else f'{{ endpoint: {existing_endpoint!r}, toJSON: () => ({{ endpoint: {existing_endpoint!r}, keys: {{ p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg" }} }}), unsubscribe: async () => {{ window.__pushLog.unsubscribed++; currentSub = null; return true; }} }}')};
+      let currentSub = {('null' if not existing_endpoint else f'{{ endpoint: {existing_endpoint!r}, toJSON: () => ({{ endpoint: {existing_endpoint!r}, keys: {{ p256dh: {VAPID_PUB!r}, auth: {PUSH_AUTH!r} }} }}), unsubscribe: async () => {{ window.__pushLog.unsubscribed++; currentSub = null; return true; }} }}')};
       Object.defineProperty(window, 'Notification', {{
         configurable: true,
         value: {{
@@ -78,7 +81,7 @@ def install_push_mock(page, permission="default", existing_endpoint=None):
             window.__pushLog.subscribed.push({{ userVisibleOnly: opts.userVisibleOnly, keyLen: opts.applicationServerKey?.length || 0 }});
             currentSub = {{
               endpoint: 'https://web.push.apple.com/mock-device',
-              toJSON: () => ({{ endpoint: 'https://web.push.apple.com/mock-device', keys: {{ p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' }} }}),
+              toJSON: () => ({{ endpoint: 'https://web.push.apple.com/mock-device', keys: {{ p256dh: {VAPID_PUB!r}, auth: {PUSH_AUTH!r} }} }}),
               unsubscribe: async () => {{ window.__pushLog.unsubscribed++; currentSub = null; return true; }},
             }};
             return currentSub;

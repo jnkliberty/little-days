@@ -32,10 +32,11 @@ Little Days uses these third-party works. Each keeps its own license.
    OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-2. D3 7.9.0 (ISC License)
-   The charts use the D3 library, saved unchanged in runtime/web/vendor/d3-7.9.0.min.js.
+2. d3-array 3.2.4 ticks (ISC License)
+   The growth axis uses ticks and tickSpec from d3-array, saved in
+   runtime/web/vendor/d3-array-ticks-3.2.4.js with its export adapted for the browser.
    Its license text is in runtime/web/vendor/D3-LICENSE.
-   Source: https://github.com/d3/d3
+   Source: https://github.com/d3/d3-array/blob/v3.2.4/src/ticks.js
 
 3. Caddy 2.10.2 (Apache License 2.0)
    compose.yaml runs the unchanged official Caddy container image to make the HTTPS certificate.

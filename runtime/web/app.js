@@ -133,6 +133,8 @@ const W = {
   correctRange:['End must be after the start, within 24 hours, and no later than now.','El fin debe ser posterior al inicio, dentro de las 24 horas y no después de ahora.'],correctTitle:['Correct timer end','Corregir fin del temporizador'],correctHelp:['Choose the actual end time. It must be before now and within 24 hours of the start.','Elija la hora real de fin. Debe ser anterior a ahora y dentro de las 24 horas desde el inicio.'],startDate:['Start date','Fecha de inicio'],startTime:['Start time','Hora de inicio'],endTime:['End time','Hora de fin'],lengthIs:[v=>`Length: ${v}`,v=>`Duración: ${v}`],hintEnd:['Enter an end time after the start time.','Escriba una hora de fin posterior a la de inicio.'],hintTime:['Enter a time that has passed, like 9:30.','Escriba una hora que ya pasó, como 9:30.'],hintClock:['Enter a time like 9:30.','Escriba una hora como 9:30.'],hintEarlier:['Choose a time in the last 12 hours.','Elija una hora de las últimas 12 horas.'],startedEarlier:['Started earlier?','¿Empezó antes?'],changeStart:['Change start','Cambiar inicio'],saveStart:['Save start','Guardar inicio'],startChanged:[time=>`Start changed to ${time}.`,time=>`Inicio cambiado a las ${time}`],invalidDuration:['The start time plus the duration must be now or earlier.','La hora de inicio más la duración debe ser ahora o antes.'],hintMedName:['Enter the medicine name to save.','Escriba el nombre del medicamento para guardar.'],hintDose:['Enter the dose to save.','Escriba la dosis para guardar.'],hintUnit:['Choose a unit to save.','Elija una unidad para guardar.'],invalidRange:['The end time must be now or earlier.','La hora de fin debe ser ahora o antes.'],saveNotConfirmed:['Save not confirmed. Check again.','No se confirmó el guardado. Revise de nuevo.'],checkAgain:['Check again','Revisar de nuevo'],photoRetry:['Select the same photo to retry this save.','Seleccione la misma foto para reintentar este guardado.'],reviewConflict:['This entry changed elsewhere. Review it before saving again.','Este registro cambió en otro lugar. Revíselo antes de guardarlo de nuevo.'],
   today: ['Today', 'Hoy'], yesterday: ['Yesterday', 'Ayer'], empty: ['Nothing logged yet.', 'Todavía no hay registros.'], now: ['Now', 'Ahora'], notSet: ['Not set', 'Sin indicar'], running: ['running', 'en curso'],
   napW: ['Nap', 'Siesta'], slept: ['Slept', 'Durmió'], of: [(n, m) => `${n} of ${m}`, (n, m) => `${n} de ${m}`],
+  photoPosition: [(i,n) => `Photo ${i} of ${n}`, (i,n) => `Foto ${i} de ${n}`],
+  readCaption: ['Read full caption','Leer la descripción completa'],
   photosT: [n => `Photos of ${n}`, n => `Fotos de ${n}`], photosOlder: ['Load older', 'Cargar anteriores'], babyDefault: ['Baby', 'Bebé'],weight: ['Weight', 'Peso'], useBirthDate: ['Use birth date', 'Usar fecha de nacimiento'], length: ['Length', 'Estatura'], head: ['Head circumference', 'Perímetro cefálico'], growth: ['Growth', 'Crecimiento'], unit: ['Unit', 'Unidad'], unitsL: ['Units', 'Unidades'],
   loggedBy: ['Logged by', 'Registrado por'], hrs: ['h', 'h'], min: ['min', 'min'],
   ageDays:[n=>`${n} ${n===1?'day':'days'} old`,n=>`${n} ${n===1?'día':'días'} de edad`], ageWeeks:[n=>`${n} ${n===1?'week':'weeks'} old`,n=>`${n} ${n===1?'semana':'semanas'} de edad`],
@@ -1070,7 +1072,7 @@ function homeHTML() {
   const tiles=LittleDaysCryUI.homeTilesHTML(`<section class="tiles" aria-label="${t('logAria')}">${tileHTML()}</section>`);
   const question=LittleDaysCryUI.askHTML(),insight=statusCard();
   const first=homeHeader()+(runs.length?`<div class="group">${runs.join('')}</div>`:'')+tiles+(question||insight);
-  return `<div class="wrap"><div class="home-first">${first}</div>${question?insight:''}${LittleDaysReportsUI.homeCardHTML()}${body}${homeNav()}</div>`;
+  return `<div class="wrap">${first}${question?insight:''}${body}${LittleDaysReportsUI.homeCardHTML()}${homeNav()}</div>`;
 }
 function themeRow(){const m=themeMode();return `<div class="theme-row"><span class="fl" id="theme-label">${t('themeTitle')}</span><div class="seg3" role="group" aria-labelledby="theme-label">${[['auto','themeAuto'],['on','themeOn'],['off','themeOff']].map(([k,w])=>`<button type="button" class="chip" data-act="theme" data-arg="${k}" aria-pressed="${m===k}">${ic('check','ck')}${t(w)}</button>`).join('')}</div><p>${t('themeHint')}</p></div>`;}
 function upcomingAppointmentsHTML(){
@@ -1482,7 +1484,7 @@ function growthAxis(measure,points) {
   const values=points.map(p=>p.value), weeks=Math.max(8,Math.ceil(Math.max(0,...points.map(p=>p.week))/2)*2);
   if(us){
     const lo=Math.min(Math.floor(measure.lo*factor),Math.floor(Math.min(...values))), hi=Math.max(Math.ceil(measure.hi*factor),Math.ceil(Math.max(...values)));
-    return {lo,hi,weeks,ticks:d3.ticks(lo,hi,3).filter(v=>v>lo&&v<hi)};
+    return {lo,hi,weeks,ticks:LittleDaysTicks(lo,hi,3).filter(v=>v>lo&&v<hi)};
   }
   const lo=Math.min(measure.lo,Math.floor(Math.min(...values)/measure.step)*measure.step), hi=Math.max(measure.hi,Math.ceil(Math.max(...values)/measure.step)*measure.step), ticks=[...measure.ticks];
   for(let v=measure.ticks[0]-measure.step;lo<measure.lo&&v>=lo;v-=measure.step)ticks.unshift(v);
@@ -1553,8 +1555,8 @@ function chartsHTML() {
   const args=chartArguments(), data=LittleDaysTrends.rows(...args), status=chartStatus();
   S.chartRows=[...data.days,data.today];S.chartRenderedMinute=`${todayISO()}:${nowM()}`;S.chartDirty=false;
   const cards=status?`<section class="card"><h2>${t('glance')}</h2>${status}</section>`:
-    `${glanceSectionHTML(args)}${rhythmCard(S.chartRows)}<div class="group">${barSpecs().map(barCard).join('')}</div>${growthCard()}`;
-  return `<div class="wrap charts-page">${LittleDaysReportsUI.chartsCardHTML()}${cards}</div>`;
+    `${glanceSectionHTML(args)}${rhythmCard(S.chartRows)}${LittleDaysReportsUI.chartsCardHTML()}<div class="group">${barSpecs().map(barCard).join('')}</div>${growthCard()}`;
+  return `<div class="wrap charts-page">${cards}${status?LittleDaysReportsUI.chartsCardHTML():''}</div>`;
 }
 function glanceSectionHTML(args) {
   const summary=LittleDaysTrends.summarize(...args);
@@ -1567,14 +1569,31 @@ function chartStatus() {
 }
 
 /* ---------- photos (drawn stand-ins) ---------- */
+function photoCaption(entry) {
+  const text=entry.type==='note'&&!entry.what?String(entry.text||'').trim():'';
+  return text||entry.title||entry.photoName||t('note');
+}
+const LONG_CAPTION=120;
+function photoLabel(text,index,total) {
+  if(text.length<=LONG_CAPTION)return text;
+  const preview=Array.from(text).slice(0,48).join('').trimEnd();
+  return `${t('photoPosition',index+1,total)} · ${preview}…`;
+}
 function photosHTML() {
   const add=resourceAllowed('notes','add')?`<button type="button" class="btn" data-act="open-photo">${t('photoAdd')}</button>`:'';
   const photos=S.entries.filter(e=>e.photo),total=photos.length,found=photos.findIndex(e=>String(e.id)===S.photoId),p=found>=0?found:Math.max(0,total-1),entry=photos[p];  // the large photo is the one picked, else the newest
   const older=`<button type="button" class="btn" data-act="photos-older">${t('photosOlder')}</button>`;
   const timelapse=LittleDaysExtrasUI.photosCardHTML();
   if(!entry){const inFirstWindow=S.photoFrom==null||S.photoFrom>=-(PHOTO_DAYS-1);const emptyText=(inFirstWindow&&LittleDaysExtrasUI.photosEmptyText())||t('photosEmpty');return `${timelapse}<div class="card"><div class="strip f-off"><h2>${t('photosT',esc(babyName()))}</h2></div><div class="body">${emptyState('camera',emptyText,add)}${older}</div></div>`;}
-  const main=`<img src="${esc(entry.photo)}" alt="${esc(entry.photoName||entry.title||t('photoAdd'))}" style="display:block;width:100%;height:auto">`,caption=esc(entry.title||entry.photoName||t('note'));
-  const thumbs=photos.map((e,i)=>`<button type="button" class="pth" data-act="photo" data-arg="${i}" aria-pressed="${i===p}" aria-label="${esc(e.title||e.photoName||t('photoAdd'))}"><img src="${esc(e.photo)}" alt="" style="display:block;width:100%;height:auto"></button>`).join('');
+  const fullCaption=photoCaption(entry);
+  const longCaption=fullCaption.length>LONG_CAPTION;
+  const main=`<img src="${esc(entry.photo)}" alt="${esc(photoLabel(fullCaption,p,total))}" style="display:block;width:100%;height:auto">`;
+  const captionOpen=$('.pcap details[open]')?.dataset.photo===String(entry.id);
+  const caption=longCaption?`<details data-photo="${esc(entry.id)}"${captionOpen?' open':''}><summary data-focus="photo-caption">${esc(t('readCaption'))}</summary>${esc(fullCaption)}</details>`:esc(fullCaption);
+  const thumbs=photos.map((e,i)=>{
+    const label=photoLabel(photoCaption(e),i,total);
+    return `<button type="button" class="pth" data-act="photo" data-arg="${i}" aria-pressed="${i===p}" aria-label="${esc(label)}"><img src="${esc(e.photo)}" alt="" style="display:block;width:100%;height:auto"></button>`;
+  }).join('');
   return `${timelapse}<div class="card"><div class="strip f-off"><h2>${t('photosT',esc(babyName()))}</h2>${add}</div><div class="body"><div class="pbig">${main}</div><div class="pcap">${caption}</div>${photos.length>1?`<div class="pthumbs">${thumbs}</div>`:''}${older}</div></div>`;
 }
 // Opening Photos loads the last 31 days (the server takes 31 days or fewer in one request); Load older adds the 31 days before them.
@@ -1614,6 +1633,7 @@ Object.assign(W,{
   changeStartTime:['Change the start time','Cambiar la hora de inicio'],
   startPumpTimer:['Start the pump timer','Iniciar el temporizador de extracción'],
   hintDiaperKind:['Choose Wet, Dirty or Wet and dirty to save.','Elija Pipí, Popó o Pipí y popó para guardar.'],
+  hintDuty:['Choose a different adult to save.','Elija a otra persona adulta para guardar.'],
   wetDirty:['Wet and dirty','Pipí y popó'],
   onDutyRow:['On duty','En turno'],babyPhoto:['Baby photo','Foto del bebé'],
   kindL:['Kind','Clase'],typeL:['Type','Tipo'],moreVisit:['Doctor visit','Registro de consulta'],moreAppt:['Appointment','Cita con pediatra'],moreRemind:['Reminder','Programar un recordatorio'],
@@ -1640,8 +1660,8 @@ function sheetShell(title, bodyHTML, save) {  // save: null (hidden) | {label, o
   const head=list?`<header class="bar"><button type="button" class="back" data-act="cancel">${glyph('back')}${t('tabHome')}</button><h1${kind==='settings'?' id="settings-title"':''}>${esc(title)}</h1><span></span></header>`
     :`<header class="bar form-head"><button type="button" class="back" data-act="cancel">${t('cancel')}</button><h1>${iconBlock(look.icon)}${esc(title)}</h1><span></span></header>`;
   const foot=save?`<div class="sh-foot">${hintEl}<button type="button" class="btn-primary" data-act="save"${always?' data-always':''} ${disabled?'disabled aria-disabled="true"':''}>${save.label}</button>${save.after||''}</div>`:'';
-  const inner=list?bodyHTML:`<div class="sheet">${save?'':hintEl}${bodyHTML}${foot}</div>`;
-  return `<div class="formscreen" data-sheet data-kind="${esc(kind)}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="wrap ${list?'t-plain':look.cls}">${head}${messageHTML()}${inner}</div></div>`;
+  const inner=list?bodyHTML:`<div class="sheet">${save?'':hintEl}${bodyHTML}</div>`;
+  return `<div class="formscreen${save?' with-save':''}" data-sheet data-kind="${esc(kind)}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="wrap ${list?'t-plain':look.cls}">${head}${messageHTML()}${inner}</div>${foot}</div>`;
 }
 // A two-button confirm is a small bottom sheet over the page.
 function bottomSheet(title,bodyHTML,foot){
@@ -1657,6 +1677,7 @@ function saveHint(s){if(!s||s.kind==='correction')return '';
   return SHEET_HINTS[s.kind]?.(s)||(SAVE_VALIDATORS[s.kind]?.(s)===false?t('hintGeneric'):'');}
 // Each hint names the first missing item; '' falls back to the generic hint while Save is off.
 const SHEET_HINTS={
+  duty:s=>SAVE_VALIDATORS.duty(s)?'':t('hintDuty'),
   split:s=>validSplit(s)?'':t('splitInvalid'),
   edit:s=>!('valueEndHour' in s)||validEditRange(s,s.valueDur)?'':rangeHint(s,s.valueDur),
   quick:s=>s.what!=='tummy'&&s.what!=='bath'||SAVE_VALIDATORS.quick(s)?'':s.completed?t('hintTime'):positive(s.duration)?t('invalidDuration'):t('hintDuration'),
@@ -1842,7 +1863,7 @@ function moreSheet() {
     +row('open-note',t('note'),'note')+row('open-handoff',t('handoff'),'swap')+row('open-reminder',t('moreRemind'),'clock');
   return sheetShell(t('logElse'),`<nav class="card nav icons" aria-label="${t('logElse')}"><ul>${rows}</ul></nav>`,null);
 }
-// Settings (round 3): On duty, Baby, Language, Units, Night, Care connection, then who is signed in.
+// Language, units and appearance share one settings card.
 function settingsSheet(s) {
   const portraitImg=S.portraitDraft?`<img class="mini-portrait" src="${esc(S.portraitDraft.url)}" alt="${esc(S.child?.name||'')}">`:S.child?.portrait?`<img class="mini-portrait" src="${esc(S.child.portrait)}" alt="${esc(S.child.name||'')}">`:LittleDaysBunny.svg('settings-bunny');
   const change=resourceAllowed('children','change')?`<label class="textlink portrait-upload">${t('changePhoto')}${glyph('chev')}<input class="portrait-file" type="file" accept="image/*" data-fid="portrait" aria-label="${t('changePhoto')}"></label>`:'';
@@ -1853,6 +1874,7 @@ function settingsSheet(s) {
   const draft=pd?`<div class="portrait-tools"><span class="portrait-name">${esc(pd.name)}</span>${!failed?'':`<button type="button" class="btn-primary" data-act="portrait-save"${S.photoBusy?' disabled aria-disabled="true"':''}>${t('retry')}</button>`}</div>`:'';
   const err=S.photoBusy?`<p role="status" class="photo-prep">${t('photoPrep')}</p>`:pd&&!mayChange?`<p role="alert">${t('photoNotAllowed')}</p>`:S.portraitError?`<p role="alert">${photoErrorText(S.portraitError)}</p>`:'';
   const group=(title,inner,cls='')=>`<section class="day"><h2>${title}</h2><div class="card ${cls}">${inner}</div></section>`;
+  const preference=(title,inner)=>`<section class="day"><h2>${title}</h2>${inner}</section>`;
   const pick=(key,list,cur)=>`<div class="chips" role="group">${list.map(([v,w])=>`<button type="button" class="chip" data-setting="${key}" data-value="${v}" data-focus="setting-${key}-${v}" aria-pressed="${cur===v}">${glyph('check')}${w}</button>`).join('')}</div>`;
   const nav=(inner,attr)=>`<ul><li><button type="button" class="nav-row" ${attr}><span>${inner}</span><span class="chev">${glyph('chev')}</span></button></li></ul>`;
   const age=ageText(),name=babyName();
@@ -1862,10 +1884,12 @@ function settingsSheet(s) {
   return sheetShell(t('settings'),`<div class="wrap-settings">
     ${group(t('onDutyRow'),`<div class="line"><strong>${esc(shownName(S.duty))}</strong><button type="button" class="textlink" data-act="duty" aria-label="${t('dutyAria')}">${t('change')}${glyph('chev')}</button></div>`)}
     ${group(t('baby'),`<div class="row t-plain">${portraitImg}<div><strong>${esc(name)}</strong>${age?`<span class="sub">${age}</span>`:''}</div>${change}</div>${draft}${err}`)}
-    ${group(t('language'),pick('lang',[['en','English'],['es','Español']],S.lang))}
-    ${group(t('unitsL'),pick('units',[['metric','ml'],['us','oz']],unitsOf()))}
-    ${group(t('nightL'),nav(`<strong>${t('dimSchedule')}</strong><span class="sub">${dimWord}</span>`,'data-act="night-open"'),'nav')}
-    ${nightOpen?`<section class="card settings-card" data-night>${themeRow()}<button type="button" class="chip" data-setting="night" data-focus="setting-night" aria-pressed="${S.night}">${glyph('check')}${t('nightRules')}</button></section>`:''}
+    <div class="card settings-preferences">
+    ${preference(t('language'),pick('lang',[['en','English'],['es','Español']],S.lang))}
+    ${preference(t('unitsL'),pick('units',[['metric','ml'],['us','oz']],unitsOf()))}
+    ${preference(t('nightL'),nav(`<strong>${t('dimSchedule')}</strong><span class="sub">${dimWord}</span>`,'data-act="night-open"'))}
+    ${nightOpen?`<section class="settings-card" data-night>${themeRow()}<button type="button" class="chip" data-setting="night" data-focus="setting-night" aria-pressed="${S.night}">${glyph('check')}${t('nightRules')}</button></section>`:''}
+    </div>
     ${group(t('fcSetH'),`<div class="form-field"><span class="fl" id="fc-l">${t('fcSetL')}</span>${pick('forecast',[['on',t('fcOn')],['off',t('fcOff')]],S.preferences?.forecast==='off'?'off':'on').replace('role="group"','role="group" aria-labelledby="fc-l"')}</div>`)}
     ${LittleDaysAlertsUI.settingsHTML({lang:S.lang,prefs:S.preferences,resourceAllowed,glyph,esc})}
     ${LittleDaysCryUI.settingsHTML()}
@@ -2179,7 +2203,7 @@ const EDIT_VALIDATORS={
 function positive(v){return validNumber(v)&&+v>0;}
 function validEdit(e,s){if(!e)return false;if(e.type==='reminder')return EDIT_VALIDATORS.reminder(s);const h=+s.hh,m=+s.mm;return validDate(s.editDate)&&Number.isInteger(h)&&h>=1&&h<=12&&Number.isInteger(m)&&m>=0&&m<=59&&['AM','PM'].includes(s.period)&&(EDIT_VALIDATORS[e.type]?.(s,e)??true);}
 function hasDraft(s){return !!(s?.dirty||s?.startDirty);}
-function dutySheet(s){const adults=S.people.map(personName).filter(Boolean);return sheetShell(t('dutyTitle'),`<div class="chips" role="group" aria-label="${t('dutyTitle')}">${adults.map(n=>chipB('dwho',n,s.who===n,esc(shownName(n)),'big3 sel-sleep')).join('')}</div>${textareaField('dutyNote',t('note'),s.note||'',2,`aria-label="${t('handoff')}" placeholder="${t('optional')}"`)}`,{label:t('save'),on:adults.includes(s.who)&&s.who!==S.duty});}
+function dutySheet(s){const adults=S.people.map(personName).filter(Boolean);return sheetShell(t('dutyTitle'),`<div class="chips" role="group" aria-label="${t('dutyTitle')}">${adults.map(n=>chipB('dwho',n,s.who===n,esc(shownName(n)),'big3 sel-sleep')).join('')}</div>${textareaField('eventNote',t('note'),s.note||'',2,`aria-label="${t('handoff')}" placeholder="${t('optional')}"`)}`,{label:t('save'),on:SAVE_VALIDATORS.duty(s)});}
 function confirmSheet(s){
   const retrying=S.retrySame===s,off=S.busy||!!S.pendingSheetOperation&&!retrying||hasUnresolvedSheet(s)&&!retrying;
   return bottomSheet(t('confirmT'),`<p class="cn" style="font-weight:700">${t('confirmBody',esc(shownName(s.by)))}</p>`,`<div class="sh-foot"><button type="button" class="btn" data-act="cancel">${t('cancel')}</button><button type="button" class="btn solid" data-act="save" ${off?'disabled aria-disabled="true"':''}>${t('confirmGo')}</button></div>`);
@@ -2462,7 +2486,7 @@ async function saveOther(s){
   if(s.kind==='visit')return saveVisit(s);
   if(s.kind==='handoff'&&s.text?.trim())return addEntries([{type:'note',title:'handoff',text:s.text.trim(),t:nowM()}],()=>t('savedItem',t('handoff')));
   if(s.kind==='reminder'&&s.recipient===personName(S.me)&&validEventDateTime(s))return saveReminder(s);
-  if(s.kind==='duty')return saveDuty(s);
+  if(s.kind==='duty'&&SAVE_VALIDATORS.duty(s))return saveDuty(s);
 }
 async function saveAppointment(s){return addEntries([{type:'other',what:'appointment',title:s.title.trim(),provider:s.provider||'',location:s.location||'',note:s.note||'',t:startMinutes(s.date,s.hour,s.minute,s.period)}],()=>t('savedItem',t('appointment')));}
 async function saveVisit(s){return addEntries([{type:'note',what:'visit',provider:s.provider||'',reason:s.reason||'',observations:s.observations||'',instructions:s.instructions||'',weightKg:s.weightKg===''?null:+s.weightKg,lengthCm:s.lengthCm===''?null:+s.lengthCm,headCm:s.headCm===''?null:+s.headCm,followUpDate:s.followUpDate||null,t:startMinutes(s.date,s.hour,s.minute,s.period)}],()=>t('savedItem',t('visitRecord')),s.photoFile||null);}
@@ -2801,7 +2825,7 @@ function appHTML() {
   const top=S.tab==='home'?'':`<header class="bar screen-top"><button type="button" class="back" ${home}>${glyph('back')}${t('tabHome')}</button><h1${h1}>${t(titles[S.tab]||'tabHome')}</h1>${S.tab==='log'?tlBarEnd():''}</header>`;
   // The chat scrolls its own thread, so it skips the shared scroll area and the dock.
   const screen=S.tab==='home'?homeHTML():S.tab==='log'?timelineHTML():S.tab==='charts'?chartsHTML():photosHTML();
-  const body=S.tab==='chat'?chatHTML():`<div class="scroll" data-scroll>${screen}</div>${S.tab==='home'&&!S.sheet&&!layerOpen?dockHTML():''}`;
+  const body=S.tab==='chat'?chatHTML():`<div class="scroll" data-scroll="${S.tab}">${screen}</div>${S.tab==='home'&&!S.sheet&&!layerOpen?dockHTML():''}`;
   return `<div class="${cls}" lang="${S.lang}"><input id="retry-photo-picker" type="file" accept="image/jpeg,image/png,image/webp" hidden><div class="main" ${S.sheet||S.confirmStop||layerOpen?'inert':''}>${top}${body}</div>${S.confirmStop||LittleDaysCryUI.sheetOpen()?sh.replace('data-sheet','inert data-sheet'):sh}${cry}${reports}${extras}${toast}${confirmStopHTML()}</div>`;
 }
 const keyOf = e => e && e.dataset ? (e.dataset.focus ? 'focus|' + e.dataset.focus : e.dataset.act ? e.dataset.act + '|' + (e.dataset.arg || '') : e.dataset.fid ? 'fid|' + e.dataset.fid : '') : '';
@@ -2942,7 +2966,7 @@ function render() {
   LittleDaysBunny.release();
   syncTheme();
   const key = keyOf(document.activeElement), typed = typedField(document.activeElement);
-  const sc = $('[data-scroll]'), st = sc ? sc.scrollTop : 0, sb = $('.sh-body,.formscreen'), sbt = sb ? sb.scrollTop : 0, hadSheet = !!sb;
+  const sc = $('[data-scroll]'), st = sc ? sc.scrollTop : 0, sb = $('.sh-body,.formscreen.with-save>.wrap,.formscreen:not(.with-save)'), sbt = sb ? sb.scrollTop : 0, hadSheet = !!sb;
   const tableScroll=[...document.querySelectorAll('[data-chart-numbers]')].map(el=>({kind:el.dataset.chartNumbers,open:el.open,left:el.querySelector('.chart-table-scroll').scrollLeft}));
   const status=$('#shell-status');if(status){status.innerHTML=S.sheet||S.auth==='login'||S.auth==='error'?'':messageHTML();status.className=status.innerHTML?'shell-status':'';}
   if(S.auth==='loading'){ document.documentElement.lang=S.lang; $('#stage').innerHTML=`<div class="shell-card loading" role="status">${t('loading')}</div>`; return; }
@@ -2952,9 +2976,9 @@ function render() {
   document.documentElement.lang=S.lang;const openPickers=[...document.querySelectorAll('#stage input[type=file]')].filter(el=>el._picking);$('#stage').innerHTML=appHTML();keepOpenPickers(openPickers);
   drawCharts();
   for(const saved of tableScroll){const el=document.querySelector(`[data-chart-numbers="${saved.kind}"]`);if(el){el.open=saved.open;el.querySelector('.chart-table-scroll').scrollLeft=saved.left;}}
-  const sc2 = $('[data-scroll]'); if (sc2) sc2.scrollTop = st;
+  const sc2 = $('[data-scroll]'); if (sc2 && sc2.dataset.scroll === sc?.dataset.scroll) sc2.scrollTop = st;
   LittleDaysBunny.scan();
-  const sb2 = $('.sh-body,.formscreen'); if (sb2 && hadSheet) sb2.scrollTop = sbt;
+  const sb2 = $('.sh-body,.formscreen.with-save>.wrap,.formscreen:not(.with-save)'); if (sb2 && hadSheet) sb2.scrollTop = sbt;
   if(S.busy||S.pendingSheetOperation){document.querySelectorAll('[data-sheet] input,[data-sheet] select,[data-sheet] textarea,[data-sheet] button').forEach(el=>{if(!S.busy&&!hasUnresolvedSheet(S.sheet)&&el.matches('[data-act="delete-entry"]')||el.closest('.settings-card')||el.matches('[data-act="retry-write"]')||el.matches('.portrait-file')&&portraitOpen()&&!S.pendingSheetOperation)return;const retrying=S.retrySame&&(S.retrySame===S.sheet||S.sheet?.kind==='discard'&&S.sheet.draft===S.retrySame),retrySave=retrying&&el.matches('[data-act="save"]'),discardControl=retrying&&['cancel','keep','discard'].includes(el.dataset.act);if(!retrySave&&!discardControl&&!el.matches('[data-act="undo"]'))el.disabled=true;});}
   const kind = S.sheet ? S.sheet.kind : null;
   if (kind && kind !== lastSheetKind) { const c = $('[data-sheet] [data-act="cancel"]') || $('[data-sheet] button:not([disabled])'); if (c) c.focus({preventScroll: true}); }   // a new sheet starts on Cancel; a confirm with no Cancel starts on its first button
@@ -2994,6 +3018,7 @@ async function readPhoto(target){const picked=target.files?.[0],id=target.datase
   if(S.sheet!==draft){URL.revokeObjectURL(preview);return;}if(draft.photo?.startsWith?.('blob:'))URL.revokeObjectURL(draft.photo);draft.photo=preview;draft.photoFile=f;draft.photoName=f.name;draft.photoRemoved=false;draft.photoError=false;draft.dirty=true;requestAnimationFrame(render);
 }
 const SAVE_VALIDATORS={
+  duty:s=>S.people.map(personName).filter(Boolean).includes(s.who)&&s.who!==S.duty,
   split:validSplit,
   correction:validCorrection,
   feed:s=>s.early==='switch'?!earlyHint(s)&&(S.run?.side!=='bottle'||bottleAmountOk(s)):s.tab==='pump'?s.pL+s.pR>0&&pumpTimeOk(s):s.tab==='bottle'?bottleOk(s):s.tab==='breast'&&s.manual?!!s.manualSide&&validDurationRange(s,'manualDate','hour','minute','period','manualDuration'):true,

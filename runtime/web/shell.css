@@ -1,9 +1,5 @@
 /* Shared account controls and connection states use the same Gallery tokens. */
 .account-name{overflow-wrap:anywhere;font-weight:700}
-/* Settings sit in More as one card: tight gaps inside a setting, wide gaps between settings. */
-.sh-body>.settings-card{padding:20px;display:grid;gap:var(--space-control)}
-.settings-card h3{font-size:var(--fs-h3)}
-.settings-card .btn{width:100%}
 .stage:has(>.shell-card){align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 16px}
 .shell-card{width:100%;background:var(--card);border:0;border-radius:24px;padding:24px;display:grid;gap:16px;align-content:start}
 .shell-card h1{font-size:24px;font-weight:700;line-height:1.2}

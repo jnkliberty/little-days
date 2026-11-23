@@ -90,6 +90,7 @@ def audit_drag_tracking(page):
     page.mouse.up()
     check('pointer cancellation clears drag state and keeps the fact', fact(page) == current and page.evaluate('factSwipe===null') and page.locator('.fact-content:not([data-fact-outgoing])').evaluate('e=>e.style.transform===""'))
     page.emulate_media(reduced_motion='reduce')
+    page.clock.run_for(50)  # Let the media change redraw finish before the next drag.
     x, y = body_point(page)
     page.mouse.move(x, y)
     page.mouse.down()

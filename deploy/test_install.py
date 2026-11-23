@@ -19,6 +19,11 @@ class OriginForm(unittest.TestCase):
         with self.assertRaises(install.AnswerError):
             install.normalize_origin("http://localhost:443")
 
+    def test_invalid_ports_and_hosts_return_an_answer_error(self):
+        for address in ("https://localhost:bad", "https://localhost:65536", "https://localhost:0", "https://[::1"):
+            with self.subTest(address=address), self.assertRaises(install.AnswerError):
+                install.normalize_origin(address)
+
     def test_the_stored_origin_and_the_host_and_port_come_from_that_one_form(self):
         lines = dict(line.split("=", 1) for line in install.env_text("https://LOCALHOST:443", "UTC", 1, 1).splitlines() if line and not line.startswith("#"))
         self.assertEqual((lines["LITTLE_DAYS_ORIGIN"], lines["LITTLE_DAYS_HOST"], lines["LITTLE_DAYS_HTTPS_PORT"]), ("https://localhost", "localhost", "443"))

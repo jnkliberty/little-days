@@ -93,8 +93,30 @@ def flow(browser, base, width, height, lang):
     assert len(history) == 4
     assert not page.errors, page.errors
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+    axes = page.evaluate("""() => {
+      S.units[meKey()]='us';
+      render();
+      return GROWTH_MEASURES.map(measure=>growthAxis(measure,[]).ticks);
+    }""")
+    assert axes == [[5, 10, 15], [18, 20, 22, 24], [14, 16]], axes
+    assert not page.errors, page.errors
+    print('PASS', lang, width, 'US growth axes retain their tick values', flush=True)
     print('PASS', lang, width, 'birth measurements, chart after reload, invalid input, refused save and retry', flush=True)
     page.context.close()
+
+
+def audit_signin_assets(browser, base):
+    page = browser.new_page()
+    requested = []
+    page.on('request', lambda request: requested.append(request.url))
+    page.route('**/api/session', lambda route: route.fulfill(json={'me': None, 'csrf': 'test', 'passcode': True}))
+    page.goto(base)
+    page.wait_for_function("typeof LittleDaysTicks === 'function' && S.auth !== 'loading'")
+    assert page.evaluate("typeof d3 === 'undefined'")
+    assert not any('/d3-7.9.0.min.js' in url for url in requested), requested
+    assert any('/d3-array-ticks-3.2.4.js' in url for url in requested), requested
+    print('PASS sign-in loads only the compact growth ticks script', flush=True)
+    page.close()
 
 
 def main():
@@ -110,6 +132,7 @@ def main():
         with sync_playwright() as pw:
             browser = launch_browser(pw, executable_path=shutil.which('agent-browser-chrome'))
             try:
+                audit_signin_assets(browser, base)
                 for lang in ('en', 'es'):
                     for width, height in ((390, 844), (1440, 900), (2000, 860)):
                         flow(browser, base, width, height, lang)

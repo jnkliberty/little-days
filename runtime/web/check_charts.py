@@ -220,9 +220,9 @@ def audit_layout(page, language, theme):
     label = f'C6 {language} {theme}'
     en = language == 'en'
     heads = page.locator('.charts-page .chart-head h2, .charts-page > .card > h2').all_text_contents()
-    want = (['Reports', 'At a glance', 'Daily rhythm', 'Feeds per day', 'Sleep per day', 'Wet per day', 'Dirty per day', 'Growth'] if en else
-            ['Reportes', 'De un vistazo', 'Ritmo diario', 'Tomas por día', 'Sueño por día', 'Pipí por día', 'Popó por día', 'Crecimiento'])
-    check(f'{label}: eight cards in the approved order (Reports + seven charts)', heads == want, heads)
+    want = (['At a glance', 'Daily rhythm', 'Reports', 'Feeds per day', 'Sleep per day', 'Wet per day', 'Dirty per day', 'Growth'] if en else
+            ['De un vistazo', 'Ritmo diario', 'Reportes', 'Tomas por día', 'Sueño por día', 'Pipí por día', 'Popó por día', 'Crecimiento'])
+    check(f'{label}: At a glance and Daily rhythm precede Reports', heads == want, heads)
     check(f'{label}: eight bars (seven full days and Today) in each bar chart', all(len(page.locator(f'.plot[data-chart="{k}"] .col').all()) == 8 for k in ['feeds', 'sleep', 'wet', 'dirty']))
     rows = page.locator('.plot[data-chart="rhythm"] text[x="0"]').all_text_contents()
     check(f'{label}: eight rhythm rows, Today last', len(rows) == 8 and rows[-1] == ('Today' if en else 'Hoy'), rows)
@@ -601,17 +601,18 @@ def growth_from_poll_and_swipe(page, state):
     listener = lambda request: growth_requests.append(request.url) if '/api/growth' in request.url else None
     page.on('request', listener)
 
-    def poll():
+    def poll(expected_kg):
         page.evaluate('async()=>{await syncFamily()}')
-        page.wait_for_load_state('networkidle')
+        page.wait_for_function('(kg)=>S.entries.find(e=>e.id==="weight:900")?.kg===kg', arg=expected_kg)
+        page.wait_for_function('!growthPending && !growthReloadQueued && S.growthLoaded')
 
     state['entries'].append({'id': 'weight:900', 'type': 'growth', 't': 2, 'kg': 5.0, 'cm': 56, 'head': 37, 'by': 'Sage'})
-    poll()
+    poll(5.0)
     check("another adult's new measurement today reloads growth history", len(growth_requests) == 1, growth_requests)
     state['entries'][-1]['kg'] = 5.2
-    poll()
+    poll(5.2)
     check("another adult's changed measurement reloads growth history", len(growth_requests) == 2, growth_requests)
-    poll()
+    poll(5.2)
     check('a poll with no measurement change does not reload growth history', len(growth_requests) == 2, growth_requests)
     page.wait_for_function('S.growthLoaded===true')
     state['entries'].pop()

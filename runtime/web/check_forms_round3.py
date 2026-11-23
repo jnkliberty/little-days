@@ -53,6 +53,8 @@ def settings_chips(browser, base):
 
     page.route("**/api/preferences**", preferences)
     open_settings(page)
+    check("Language, Units and appearance share one card", page.locator('.settings-preferences [data-setting="lang"]').count() == 2 and page.locator('.settings-preferences [data-setting="units"]').count() == 2 and page.locator('.settings-preferences [data-act="night-open"]').count() == 1)
+    check("the Night row has no divider inside the preferences card", page.locator('.settings-preferences [data-act="night-open"]').evaluate("e=>getComputedStyle(e).borderTopWidth === '0px'"))
     check("Settings offers Language and Units as chips, not lists", page.locator('[data-setting="lang"]').count() == 2 and page.locator('[data-setting="units"]').count() == 2 and page.locator(".settings-card select, .wrap-settings select").count() == 0)
     pick_setting(page, "lang", "es")
     page.wait_for_function("S.lang === 'es'")
@@ -185,7 +187,9 @@ def growth_empty_measure(browser, base):
     """Fails if tapping Length with no length records does nothing: the chip must show selected and the card must say No records yet."""
     page = open_app(browser, base, 390, 844, NOON, theme="off")
     page.set_default_timeout(4000)
-    page.evaluate("() => {S.tab='charts';S.growthLoading=false;S.growthError=false;S.growthUnavailable=[];S.growthEntries=[{id:'g1',type:'growth',date:'2026-10-01',kg:4.2}];S.growthMeasure='weight';render();}")
+    page.route("**/api/growth", lambda route: route.fulfill(json={"entries": [{"id": "g1", "type": "growth", "date": "2026-10-01", "kg": 4.2}], "unavailable": []}))
+    page.reload()
+    page.locator('[data-act="tab"][data-arg="charts"]').click()
     chip = lambda m: page.locator(f'[data-act="growth-measure"][data-arg="{m}"]')
     check("with weight records only, Weight is selected and the chart shows", chip("weight").get_attribute("aria-pressed") == "true" and page.locator('.plot[data-chart="growth"]').count() == 1)
     chip("length").click()

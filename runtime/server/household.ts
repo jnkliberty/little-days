@@ -73,7 +73,7 @@ function csvCell(value: unknown): string {
 function entryDate(today: string, offset: number): { date: string; time: string } {
   const date = new Date(`${today}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + Math.floor(offset / 1440));
-  const day = date.toISOString().slice(0, 10), minute = ((offset % 1440) + 1440) % 1440;
+  const day = date.toISOString().slice(0, 10), minute = Math.floor(((offset % 1440) + 1440) % 1440);
   const hour24 = Math.floor(minute / 60), hour12 = hour24 % 12 || 12;
   return { date: day, time: `${hour12}:${String(minute % 60).padStart(2, '0')} ${hour24 < 12 ? 'AM' : 'PM'}` };
 }

@@ -54,6 +54,46 @@ def sheet_text(page):
     return page.locator('[data-sheet]').inner_text() if page.locator('[data-sheet]').count() else ''
 
 
+def flow_captions(browser, base, lang):
+    page = open_app(browser, base, 390, 844, AT, lang=lang)
+    now = page.st['entries'][0]['t'] + 95
+    photo = {'photo': '/fixture.jpg', 'photoName': 'fixture.jpg', 'by': 'Rowan'}
+    long_note = 'Long photo note <sample> ' * 12 + 'End.'
+    entries = [
+        {**photo, 'id': 'notes:101', 'type': 'note', 'title': 'Note', 'text': 'Little Days sample photo <caption>', 't': now},
+        {**photo, 'id': 'notes:102', 'type': 'other', 'what': 'mile', 'title': 'First smile', 'text': 'Milestone details', 't': now - 1},
+        {**photo, 'id': 'notes:103', 'type': 'note', 'what': 'visit', 'title': 'Visit', 'text': 'Provider details', 't': now - 2},
+        {**photo, 'id': 'notes:104', 'type': 'note', 'title': '', 'text': '', 't': now - 3},
+        {**photo, 'id': 'notes:106', 'type': 'note', 'title': 'Note', 'text': long_note, 't': now - 4},
+    ]
+    page.st['entries'].extend(entries)
+    page.locator('[data-act="tab"][data-arg="photos"]').first.click()
+    page.wait_for_function('S.photoFrom !== null')
+    for entry, expected in zip(entries, ('Little Days sample photo <caption>', 'First smile', 'Visit', 'fixture.jpg')):
+        page.evaluate('(id)=>{S.photoId=id;render()}', entry['id'])
+        check(f'{lang}: photo {entry["id"]} has the intended caption', page.locator('.pcap').inner_text() == expected)
+    page.evaluate('S.photoId="notes:101";render()')
+    check(f'{lang}: the photo image and thumbnail use the caption',
+          page.locator('.pbig img').get_attribute('alt') == entries[0]['text'] and
+          page.locator('[data-act="photo"][aria-pressed="true"]').get_attribute('aria-label') == entries[0]['text'])
+    page.evaluate('S.photoId="notes:106";render()')
+    details = page.locator('.pcap details')
+    label = page.locator('[data-act="photo"][aria-pressed="true"]').get_attribute('aria-label')
+    check(f'{lang}: long notes keep the gallery and thumbnail compact', details.is_visible() and
+          not details.evaluate('(el) => el.open') and label.startswith('Foto ' if lang == 'es' else 'Photo ') and
+          'Long photo note <sample>' in label and len(label) < len(long_note))
+    details.locator('summary').click()
+    page.evaluate('render()')
+    check(f'{lang}: the complete photo note stays readable after refresh', long_note in details.inner_text() and details.evaluate('(el) => el.open'))
+    older = {**photo, 'id': 'notes:105', 'type': 'note', 'title': 'Note', 'text': 'An older photo caption', 't': now - 40 * 1440}
+    page.st['entries'].append(older)
+    page.locator('[data-act="photos-older"]').click()
+    page.wait_for_function('S.entries.some(e=>e.id==="notes:105")')
+    page.evaluate('S.photoId="notes:105";render()')
+    check(f'{lang}: an older photo keeps its caption after paging', page.locator('.pcap').inner_text() == older['text'])
+    page.context.close()
+
+
 def pick(page, name, mime, data):
     page.locator('[data-sheet] [data-fid="photo"]').set_input_files({'name': name, 'mimeType': mime, 'buffer': data})
 
@@ -763,6 +803,7 @@ def main():
             browser = launch_browser(pw, executable_path=shutil.which('agent-browser-chrome'))
             try:
                 for lang in ('en', 'es'):
+                    flow_captions(browser, base, lang)
                     for flow in (flow_add_and_save, flow_big_photo_note, flow_big_photo_portrait, flow_img_fallback, flow_busy_note, flow_busy_portrait, flow_two_picks, flow_stuck_shrink, flow_stuck_other_form, flow_undecodable_passes, flow_redraw_during_picker, flow_portrait_redraw, flow_refused_files, flow_server_refusal, flow_portrait):
                         try:
                             flow(browser, base, lang)

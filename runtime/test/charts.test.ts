@@ -4,10 +4,23 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const context = vm.createContext({});
-for (const path of ['vendor/d3-7.9.0.min.js', 'trends.js', 'charts.js']) {
+for (const path of ['vendor/d3-array-ticks-3.2.4.js', 'trends.js', 'charts.js']) {
   vm.runInContext(readFileSync(new URL(`../web/${path}`, import.meta.url), 'utf8'), context);
 }
 const charts = context.LittleDaysCharts;
+test('growth ticks retain whole, fractional, descending and single-point axis values', () => {
+  for (const [start, stop, expected] of [
+    [4, 16, [5, 10, 15]],
+    [17, 26, [18, 20, 22, 24, 26]],
+    [12, 18, [12, 14, 16, 18]],
+    [0, 0.3, [0, 0.1, 0.2, 0.3]],
+    [9, 3, [8, 6, 4]],
+    [5, 5, [5]],
+  ] as const) {
+    assert.deepEqual([...context.LittleDaysTicks(start, stop, 3)], expected);
+  }
+  assert.deepEqual([...context.LittleDaysTicks(0, 1, 0)], []);
+});
 const numbers = (svg: string, tag: string, attribute: string) =>
   [...svg.matchAll(new RegExp(`<${tag}[^>]*? ${attribute}="([-\\d.]+)"`, 'g'))].map(match => Number(match[1]));
 

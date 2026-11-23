@@ -4,9 +4,9 @@ This is a production UI shell derived from the approved round 4 UI. It has no sa
 
 `transport.js` owns browser requests. Session cookies stay HttpOnly on the server. CSRF values stay in memory and are sent in `X-CSRF-Token`; the client does not store passwords or tokens in browser storage. Record, timer, photo, reminder, preference, duty, and child writes use the agreed server routes. The UI applies returned state only after a `saved` response with state. Pending timer stops poll for a terminal result before the UI reports success.
 
-Care confirmations and export sharing have a separate screen under More. The browser sends care forms through the guarded same-origin routes and keeps care data only in memory. Each adult can confirm and revoke their own periods and must turn on sharing explicitly.
+Care confirmations and export sharing have a separate screen under Settings. The browser sends care forms through the guarded same-origin routes and keeps care data only in memory. Each adult can confirm and revoke their own periods and must turn on sharing explicitly.
 
-The browser checks use test-only mocked server responses. They verify the client contract; they do not prove writes against Baby Buddy or a running gateway. Do not treat mock test records as persisted family data. Reminder records are schedule preferences only; this UI does not send notifications.
+The browser checks use test-only mocked server responses. They verify the client contract; they do not prove writes against Baby Buddy or a running gateway. Do not treat mock test records as persisted family data. Adults can enable push notifications for reminders in Settings when the gateway has alerts configured.
 
 ## Growth curves (plan decision D5): shipped without WHO tables
 
