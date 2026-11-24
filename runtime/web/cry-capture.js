@@ -91,6 +91,7 @@ globalThis.LittleDaysCry = (() => {
     return {
       AudioContext: g.AudioContext || g.webkitAudioContext,
       AudioWorkletNode: g.AudioWorkletNode,
+      audioSession: (g.navigator && g.navigator.audioSession) || null,
       mediaDevices: g.navigator && g.navigator.mediaDevices,
       ua: () => (g.navigator && g.navigator.userAgent) || '',
       mode: () => (g.navigator && g.navigator.standalone === true) || (g.matchMedia && g.matchMedia('(display-mode: standalone)').matches) ? 'homescreen' : 'browser',
@@ -181,6 +182,7 @@ globalThis.LittleDaysCry = (() => {
     }
 
     async open() {
+      if (this.env.audioSession && this.env.audioSession.type === 'playback') setAudioSession(this.env, 'auto');
       const stream = await this.env.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1}});
       if (this.done) { stopTracks(stream); return; }
       this.stream = stream;
@@ -274,19 +276,124 @@ globalThis.LittleDaysCry = (() => {
     return new Recording(opts, opts.env || browserEnv());
   }
 
-  // Play WAV bytes through Web Audio. Call inside a tap handler. Returns {stop, ended, durationMs, sampleRate}.
-  async function play(wav, env = browserEnv()) {
-    if (globalThis.navigator?.audioSession) { try { globalThis.navigator.audioSession.type = 'playback'; } catch { /* unsupported */ } }
-    const ctx = new env.AudioContext();
-    await Promise.resolve(ctx.resume()).catch(() => {});
-    const buffer = await ctx.decodeAudioData(wav.slice().buffer);
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    const ended = new Promise(resolve => { source.onended = () => { quiet(ctx.close()); resolve(); }; });
-    source.start();
-    return {stop() { try { source.stop(); } catch { /* already ended */ } }, ended, durationMs: Math.round(buffer.duration * 1000), sampleRate: buffer.sampleRate};
+  function setAudioSession(env, type) {
+    const session = env && env.audioSession;
+    if (!session) return;
+    try { session.type = type; } catch { /* unsupported */ }
   }
 
-  return {prepare, play, isSupported, encodeWav, checkWav, PROBLEMS, MIN_MS, MAX_MS, MAX_BYTES};
+  // Direct 16-bit mono PCM WAV decoder: fallback if Safari's decodeAudioData rejects a valid clip.
+  function decodePcmWav(ctx, wav) {
+    const info = checkWav(wav);
+    const fatal = info.problems.filter(p => p !== 'too-short' && p !== 'too-long');
+    if (fatal.length || !info.samples || !info.sampleRate) throw new Error('Invalid WAV clip.');
+    const bytes = wav instanceof Uint8Array ? wav : new Uint8Array(wav);
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const buffer = ctx.createBuffer(1, info.samples, info.sampleRate);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < info.samples; i++) channel[i] = v.getInt16(HEADER + i * 2, true) / 32768;
+    return buffer;
+  }
+
+  async function decodeWav(ctx, wav) {
+    try {
+      const copy = wav instanceof Uint8Array ? wav.slice().buffer : new Uint8Array(wav).slice().buffer;
+      return await ctx.decodeAudioData(copy);
+    } catch {
+      return decodePcmWav(ctx, wav);
+    }
+  }
+
+  // Unlock Web Audio synchronously inside the tap handler so iOS Safari and Home Screen web apps play
+  // the fetched WAV clip aloud even after async fetch and with the physical Ring/Silent switch on.
+  // Returns {ready, play(wav), stop()}. Resets navigator.audioSession back to 'auto' on stop or end.
+  function preparePlay(env = browserEnv()) {
+    const fullEnv = env.audioSession === undefined ? {...browserEnv(), ...env} : env;
+    setAudioSession(fullEnv, 'playback');
+    const Ctx = fullEnv.AudioContext;
+    let ctx = null;
+    if (Ctx) { try { ctx = new Ctx(); } catch { ctx = null; } }
+    let stopped = false, source = null, closed = false, settleEnded = null;
+    // Older iOS (< 16.4) lacks navigator.audioSession: loop a silent clip during playback so the silent switch stays bypassed.
+    let nudge = null, nudgeUrl = '';
+    if (ctx) {
+      try {
+        const silent = ctx.createBuffer(1, 1, ctx.sampleRate || 44100);
+        const node = ctx.createBufferSource();
+        node.buffer = silent;
+        node.connect(ctx.destination);
+        node.start(0);
+      } catch { /* unsupported */ }
+      quiet(Promise.resolve(ctx.resume()));
+      if (!fullEnv.audioSession && typeof globalThis.Audio === 'function' && typeof URL?.createObjectURL === 'function') {
+        try {
+          nudge = new globalThis.Audio();
+          nudge.playsInline = true;
+          nudge.loop = true;
+          nudgeUrl = URL.createObjectURL(new Blob([encodeWav(new Float32Array(4410), 44100)], {type: 'audio/wav'}));
+          nudge.src = nudgeUrl;
+          quiet(nudge.play());
+        } catch { /* unsupported */ }
+      }
+    }
+    function cleanup() {
+      if (source) {
+        source.onended = null;
+        try { source.stop(); } catch { /* already ended */ }
+        source = null;
+      }
+      if (nudge) {
+        try { nudge.pause(); } catch { /* paused */ }
+        nudge.removeAttribute('src');
+        try { nudge.load(); } catch { /* unloaded */ }
+        nudge = null;
+      }
+      if (nudgeUrl) { try { URL.revokeObjectURL(nudgeUrl); } catch { /* revoked */ } nudgeUrl = ''; }
+      if (ctx && !closed) { closed = true; quiet(ctx.close()); }
+      setAudioSession(fullEnv, 'auto');
+      if (settleEnded) { const done = settleEnded; settleEnded = null; done(); }
+    }
+    function stop() {
+      if (stopped) return;
+      stopped = true;
+      cleanup();
+    }
+    return {
+      get ready() { return !!ctx; },
+      stop,
+      async play(wav) {
+        if (stopped) return null;
+        if (!ctx) throw new Error('Audio playback is not supported.');
+        if (ctx.state === 'suspended' || ctx.state === 'interrupted') await Promise.resolve(ctx.resume()).catch(() => {});
+        if (stopped) return null;
+        const buffer = await decodeWav(ctx, wav);
+        if (stopped) return null;
+        if (typeof ctx.state === 'string' && ctx.state !== 'running') {
+          await Promise.resolve(ctx.resume()).catch(() => {});
+          if (stopped) return null;
+          if (ctx.state !== 'running') { stop(); throw new Error('Audio playback was blocked.'); }
+        }
+        const node = ctx.createBufferSource();
+        node.buffer = buffer;
+        node.connect(ctx.destination);
+        source = node;
+        const ended = new Promise(resolve => {
+          settleEnded = resolve;
+          node.onended = () => stop();
+        });
+        node.start(0);
+        return {stop, ended, durationMs: Math.round(buffer.duration * 1000), sampleRate: buffer.sampleRate};
+      },
+    };
+  }
+
+  // Play WAV bytes through Web Audio. Call inside a tap handler. Returns {stop, ended, durationMs, sampleRate}.
+  async function play(wav, env = browserEnv()) {
+    const player = preparePlay(env);
+    const handle = await player.play(wav);
+    if (!handle) throw new Error('Audio playback stopped.');
+    return handle;
+  }
+
+  return {prepare, preparePlay, play, isSupported, encodeWav, checkWav, PROBLEMS, MIN_MS, MAX_MS, MAX_BYTES};
 })();

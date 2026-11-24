@@ -392,14 +392,14 @@ test('Local event routes: the id of a cry finds no local event', async () => {
   } finally { await f.close(); }
 });
 
-test('Answers: seven known answers (including gas), an Undo that names the answer it removes, and clips that go while answers stay', async () => {
-  // Failure case: one Undo removes the answer that the other parent saved after it, or gas is refused or uncounted.
+test('Answers: eight known answers (including gas and poop), an Undo that names the answer it removes, and clips that go while answers stay', async () => {
+  // Failure case: one Undo removes the answer that the other parent saved after it, or gas/poop is refused or uncounted.
   const f = await fixture();
   try {
     await f.sound('rowan', 'on');
     const { id } = await f.cry();
     const patch = (adult: string, json: unknown) => f.call('PATCH', `/api/cries/${id}`, { adult, json });
-    for (const answer of ['feed', 'diaper', 'sleep', 'burp', 'gas', 'held', 'nothing']) assert.equal((await patch('rowan', { stoppedBy: answer })).status, 200, answer);
+    for (const answer of ['feed', 'diaper', 'sleep', 'burp', 'gas', 'poop', 'held', 'nothing']) assert.equal((await patch('rowan', { stoppedBy: answer })).status, 200, answer);
     for (const json of [{ stoppedBy: 'teething' }, { stoppedBy: 7 }, { stoppedBy: '' }, { stoppedBy: '', was: 'teething' }, { stoppedBy: 'feed', was: 'feed' }, { was: 'feed' }, {}, { noisy: 'yes' }, { other: 1 }])
       assert.equal((await patch('rowan', json)).status, 400, JSON.stringify(json));
     f.clock.t += 5000;
@@ -417,9 +417,13 @@ test('Answers: seven known answers (including gas), an Undo that names the answe
     assert.equal((await patch('rowan', { noisy: true, skipped: true })).json.noisy, true);
     assert.deepEqual([f.row(id)!.noisy, f.row(id)!.skipped], [1, 1]);
     assert.equal((await f.call('PATCH', `/api/cries/${randomUUID()}`, { json: { skipped: true } })).status, 404);
-    // Delete all sound clips empties each clip and keeps each answer. Gas counts toward the goal while its clip is kept and clean.
+    // Delete all sound clips empties each clip and keeps each answer. Gas and poop count toward the goal while their clips are kept and clean.
     await f.upload(id); await patch('rowan', { stoppedBy: 'gas', noisy: false });
     assert.equal((await f.call('GET', '/api/cries')).json.count, 1);
+    await patch('rowan', { stoppedBy: 'poop' });
+    assert.equal((await f.call('GET', '/api/cries')).json.count, 1);
+    assert.equal((await patch('rowan', { stoppedBy: '', was: 'poop' })).json.changed, true);
+    assert.equal((await f.call('GET', '/api/cries')).json.count, 0);
     await patch('rowan', { stoppedBy: 'sleep' });
     await f.call('DELETE', '/api/cries/clips');
     assert.deepEqual([f.row(id)!.clip, f.row(id)!.stopped_by], [null, 'sleep']);

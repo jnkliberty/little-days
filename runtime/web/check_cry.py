@@ -1499,38 +1499,63 @@ def case_leave_end(env):
 
 
 def case_gas_and_playback(env):
-    with case(env, "Gas is an answer option, and Play 10 s unlocks audio synchronously and plays an answered cry's clip") as c:
+    with case(env, "Gas and Pooping are answer options, and Play 10 s unlocks Web Audio synchronously and plays an answered cry's clip") as c:
         cid = c.gw.seed(15, stopped_by=None, clip=True)
         p = c.open()
-        c.ok(p.until(lambda: p.visible('[data-act="cry-ask-answer"][data-arg="gas"]'), 4), "Gas chip did not show on Home")
-        p.click('[data-act="cry-ask-answer"][data-arg="gas"]')
-        c.ok(p.until(lambda: c.gw.cries()[0]["stopped_by"] == "gas", 4), f"Gas answer did not save: {c.gw.cries()}")
+        c.ok(p.until(lambda: p.visible('[data-act="cry-ask-answer"][data-arg="gas"]') and p.visible('[data-act="cry-ask-answer"][data-arg="poop"]'), 4), "Gas or Pooping chip did not show on Home")
+        c.ok("Pooping" in p.js("document.querySelector('[data-act=\"cry-ask-answer\"][data-arg=\"poop\"]').textContent"), "Pooping label missing on Home")
+        p.click('[data-act="cry-ask-answer"][data-arg="poop"]')
+        c.ok(p.until(lambda: c.gw.cries()[0]["stopped_by"] == "poop", 4), f"Pooping answer did not save: {c.gw.cries()}")
+        # Observe real AudioContext playback without stubbing it out.
         p.js("""(() => {
-          window.__plays = [];
-          const RealAudio = window.Audio;
-          window.Audio = function FakeAudio() {
-            const a = new RealAudio();
-            const origPlay = a.play.bind(a);
-            a.play = () => { window.__plays.push(a.src); return Promise.resolve(); };
-            a.pause = () => {};
-            window.__lastAudio = a;
-            return a;
+          window.__playEvents = [];
+          const RealCtx = window.AudioContext || window.webkitAudioContext;
+          const origCreate = RealCtx.prototype.createBufferSource;
+          const origResume = RealCtx.prototype.resume;
+          RealCtx.prototype.resume = function() {
+            window.__playEvents.push({ev: 'resume', state: this.state});
+            return origResume.call(this);
+          };
+          RealCtx.prototype.createBufferSource = function() {
+            const node = origCreate.call(this);
+            const origStart = node.start.bind(node);
+            node.start = (...args) => {
+              window.__playEvents.push({ev: 'start', length: node.buffer?.length || 0, duration: node.buffer?.duration || 0, state: this.state});
+              return origStart(...args);
+            };
+            return node;
           };
         })()""")
         p.js("LittleDaysCryUI.handle('cry-past')")
         c.ok(p.until(lambda: p.visible('[data-act="cry-filter"][data-arg="all"]'), 4), "Past cries did not open")
         p.click('[data-act="cry-filter"][data-arg="all"]')
         p.click(f'details[data-cry-id="{cid}"] summary')
-        c.ok(p.visible(f'[data-act="cry-answer"][data-arg="{cid}:gas"][aria-pressed="true"]'), "Gas chip is not pressed in Past cries")
+        c.ok(p.visible(f'[data-act="cry-answer"][data-arg="{cid}:poop"][aria-pressed="true"]'), "Pooping chip is not pressed in Past cries")
+        c.ok(p.visible(f'[data-act="cry-answer"][data-arg="{cid}:gas"]'), "Gas chip missing in Past cries")
+        # Change answer in Past cries to Gas, then immediately tap Play 10 s while the clip fetch is delayed.
+        p.net.next("clipget", "delay")
+        p.click(f'[data-act="cry-answer"][data-arg="{cid}:gas"]')
+        c.ok(p.until(lambda: c.gw.cries()[0]["stopped_by"] == "gas", 4), f"Gas answer did not save from Past cries: {c.gw.cries()}")
         play_btn = f'[data-act="cry-play"][data-arg="{cid}"]'
         c.ok(p.visible(play_btn) and "Play 10 s" in p.js(f"document.querySelector('{play_btn}').textContent"), "Play 10 s button missing on answered cry")
         p.click(play_btn)
-        c.ok(p.until(lambda: len(p.js("window.__plays")) >= 2, 4), f"audio did not unlock synchronously and play the fetched clip: {p.js('window.__plays')}")
-        plays = p.js("window.__plays")
-        c.ok(all(src.startswith("blob:") for src in plays) and plays[0] != plays[1], f"expected silent unlock blob then clip blob: {plays}")
-        c.ok("Stop" in p.js(f"document.querySelector('{play_btn}').textContent") and p.js(f"document.querySelector('{play_btn}').getAttribute('aria-pressed')") == "true", "button did not toggle to Stop while playing")
+        # Synchronously on tap, Web Audio unlocked (resume + 1-sample silent start) and button switched to Stop.
+        c.ok(p.until(lambda: "clipget" in p.net.held, 4), "clip fetch did not start")
+        before_clip = p.js("window.__playEvents")
+        c.ok(any(e["ev"] == "resume" for e in before_clip) and any(e["ev"] == "start" and e["length"] == 1 for e in before_clip), f"AudioContext did not unlock synchronously on tap: {before_clip}")
+        c.ok("Stop" in p.js(f"document.querySelector('{play_btn}').textContent") and p.js(f"document.querySelector('{play_btn}').getAttribute('aria-pressed')") == "true", "button did not toggle to Stop while fetching")
+        p.net.release("clipget")
+        c.ok(p.until(lambda: any(e["ev"] == "start" and e["duration"] >= 3.5 for e in p.js("window.__playEvents")), 5), f"decoded cry clip never started playing: {p.js('window.__playEvents')}")
+        c.ok(not p.js("S.message"), f"unexpected playback error: {p.js('S.message')!r}")
         p.click(play_btn)
         c.ok("Play 10 s" in p.js(f"document.querySelector('{play_btn}').textContent") and p.js(f"document.querySelector('{play_btn}').getAttribute('aria-pressed')") == "false", "tapping Stop did not restore Play 10 s")
+        # Spanish label check for Pooping (Hacer popó).
+        p_es = c.open(lang="es")
+        p_es.js("LittleDaysCryUI.handle('cry-past')")
+        c.ok(p_es.until(lambda: p_es.visible('[data-act="cry-filter"][data-arg="all"]'), 4), "Spanish Past cries did not open")
+        p_es.click('[data-act="cry-filter"][data-arg="all"]')
+        p_es.click(f'details[data-cry-id="{cid}"] summary')
+        c.ok("Hacer popó" in p_es.js(f"document.querySelector('[data-act=\"cry-answer\"][data-arg=\"{cid}:poop\"]').textContent"), "Spanish Pooping label missing")
 
 
 CASES = [case_tap_and_clip, case_row_during_slow_create, case_row_after_recording, case_new_adult_before_home, case_first_use_record, case_first_use_not_now,

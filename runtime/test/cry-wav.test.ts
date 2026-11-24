@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 // The browser file for the Crying sound clip. It sets globalThis.LittleDaysCry and touches no browser object at load.
 await import('../web/cry-capture.js');
-const {encodeWav, checkWav, prepare} = (globalThis as any).LittleDaysCry;
+const {encodeWav, checkWav, prepare, preparePlay} = (globalThis as any).LittleDaysCry;
 
 // Synthetic sound only: a quiet tone, no voice.
 const tone = (rate: number, seconds: number) => Float32Array.from({length: Math.round(rate * seconds)}, (_, i) => 0.2 * Math.sin(i / 20));
@@ -284,4 +284,94 @@ test('a first block that comes after the first sample limit fails the recording'
     assert.equal(rec.done, true);
     assert.equal((await rec.result).reason, 'first-sample-deadline');
   } finally { mock.timers.reset(); }
+});
+
+// ---- Playback: synchronous tap unlock, PCM decode fallback, audioSession lifecycle and stop races ----
+
+function fakePlayEnv({decodeFails = false, staySuspended = false, withAudioSession = true}: {decodeFails?: boolean; staySuspended?: boolean; withAudioSession?: boolean} = {}) {
+  const log: any = {created: 0, resumed: 0, started: [], stopped: 0, closed: 0, decodeCalls: 0, audioSessionTypes: [], silentStarted: 0};
+  const session = withAudioSession ? {
+    _type: 'auto',
+    get type() { return this._type; },
+    set type(v: string) { this._type = v; log.audioSessionTypes.push(v); },
+  } : null;
+  class PlayContext {
+    sampleRate = 48000;
+    state = 'suspended';
+    destination = {};
+    constructor() { log.created++; }
+    async resume() { log.resumed++; if (!staySuspended) this.state = 'running'; }
+    async close() { this.state = 'closed'; log.closed++; }
+    createBuffer(channels: number, length: number, rate: number) {
+      const data = new Float32Array(length);
+      return {numberOfChannels: channels, length, sampleRate: rate, duration: length / rate, getChannelData: () => data};
+    }
+    createBufferSource() {
+      const node: any = {
+        buffer: null, onended: null,
+        connect() {},
+        start() {
+          if (node.buffer?.length === 1) { log.silentStarted++; return; }
+          log.started.push({length: node.buffer?.length, sampleRate: node.buffer?.sampleRate, duration: node.buffer?.duration, sample0: node.buffer?.getChannelData?.(0)?.[0]});
+          log.lastSource = node;
+        },
+        stop() { log.stopped++; },
+      };
+      return node;
+    }
+    async decodeAudioData(buf: ArrayBuffer) {
+      log.decodeCalls++;
+      if (decodeFails) throw new Error('EncodingError');
+      const v = new DataView(buf), rate = v.getUint32(24, true), samples = v.getUint32(40, true) / 2;
+      const out = this.createBuffer(1, samples, rate);
+      const ch = out.getChannelData(0);
+      for (let i = 0; i < samples; i++) ch[i] = v.getInt16(44 + i * 2, true) / 32768;
+      return out;
+    }
+  }
+  return {env: {AudioContext: PlayContext, audioSession: session}, log, session};
+}
+
+// Failure case: iOS Safari stays suspended after async fetch, rejects decodeAudioData on a valid WAV, leaves audioSession on 'playback' (breaking later mic capture), or starts audio after Stop.
+// Gap: no test previously exercised cry-capture.js playback unlock, PCM fallback, audioSession reset, or stop-during-fetch/decode.
+test('preparePlay unlocks AudioContext synchronously, sets playback session, falls back to direct PCM WAV decoding, and resets audioSession on stop/end', async () => {
+  const {env, log} = fakePlayEnv({decodeFails: true});
+  const player = preparePlay(env);
+  // Synchronously inside the tap handler: audioSession is 'playback', AudioContext created, resumed, and silent 1-sample buffer started.
+  assert.deepEqual(log.audioSessionTypes, ['playback']);
+  assert.equal(log.created, 1);
+  assert.equal(log.resumed, 1);
+  assert.equal(log.silentStarted, 1);
+  // Simulate async fetch, then play a valid 4 s 8 kHz WAV where decodeAudioData fails.
+  const wav = clip(4, 8000);
+  const handle = await player.play(wav);
+  assert.equal(log.decodeCalls, 1);
+  assert.equal(log.started.length, 1);
+  assert.equal(log.started[0].sampleRate, 8000);
+  assert.equal(log.started[0].length, 32000);
+  assert.equal(handle.durationMs, 4000);
+  // Natural end closes the context and restores audioSession to 'auto'.
+  log.lastSource.onended();
+  await handle.ended;
+  assert.equal(log.closed, 1);
+  assert.deepEqual(log.audioSessionTypes, ['playback', 'auto']);
+});
+
+test('preparePlay does not start audio if stopped before bytes arrive and rejects if AudioContext stays suspended', async () => {
+  const stoppedEnv = fakePlayEnv();
+  const p1 = preparePlay(stoppedEnv.env);
+  p1.stop();
+  const h1 = await p1.play(clip(3, 8000));
+  assert.equal(h1, null);
+  assert.equal(stoppedEnv.log.started.length, 0);
+  assert.deepEqual(stoppedEnv.log.audioSessionTypes, ['playback', 'auto']);
+
+  const blockedEnv = fakePlayEnv({staySuspended: true});
+  const p2 = preparePlay(blockedEnv.env);
+  await assert.rejects(() => p2.play(clip(3, 8000)), /blocked/i);
+  assert.equal(blockedEnv.log.started.length, 0);
+
+  const throwing = preparePlay({AudioContext: function Broken() { throw new Error('limit'); }, audioSession: null});
+  assert.equal(throwing.ready, false);
+  throwing.stop();
 });

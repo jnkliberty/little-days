@@ -25,7 +25,7 @@ globalThis.LittleDaysCryUI = (() => {
   'use strict';
   const api = () => LittleDaysAPI.cries;
   const LOG = () => globalThis.LittleDaysCryLog;
-  const ANSWERS = ['feed', 'diaper', 'sleep', 'burp', 'gas', 'held', 'nothing'];
+  const ANSWERS = ['feed', 'diaper', 'sleep', 'burp', 'gas', 'poop', 'held', 'nothing'];
   const TYPES = ['feed', 'sleep', 'diaper'];
   const UNDO_MS = 10000;
 
@@ -92,7 +92,7 @@ globalThis.LittleDaysCryUI = (() => {
     firstBody: [s => `Each time this screen opens, the app can record 10 seconds of sound. The clip stays on the family computer. ${s} can switch this off.`, s => `Cada vez que se abre esta pantalla, la app puede grabar 10 segundos de sonido. El clip se queda en la computadora familiar. Se desactiva en ${s}.`],
     firstGo: ['Record 10 seconds', 'Grabar 10 segundos'], notNow: ['Not now', 'Ahora no'],
     rate: {1: ['Fussing', 'Inquieta'], 2: ['Crying', 'Llorando'], 3: ['Screaming', 'Gritando']},
-    ans: {feed: ['A feed', 'Una toma'], diaper: ['A diaper change', 'Un cambio de pañal'], sleep: ['Sleep', 'Dormir'], burp: ['A burp', 'Un eructo'], gas: ['Gas', 'Sacar gases'], held: ['Being held', 'Estar en brazos'], nothing: ['Nothing worked', 'Nada funcionó']},
+    ans: {feed: ['A feed', 'Una toma'], diaper: ['A diaper change', 'Un cambio de pañal'], sleep: ['Sleep', 'Dormir'], burp: ['A burp', 'Un eructo'], gas: ['Gas', 'Sacar gases'], poop: ['Pooping', 'Hacer popó'], held: ['Being held', 'Estar en brazos'], nothing: ['Nothing worked', 'Nada funcionó']},
   };
   const L = () => (S.lang === 'es' ? 1 : 0);
   const tr = (k, ...a) => { const v = W[k][L()]; return typeof v === 'function' ? v(...a) : v; };
@@ -648,67 +648,70 @@ globalThis.LittleDaysCryUI = (() => {
     C.playing = null;
     current.stop();
   }
-  // Playback: unlock an HTMLAudioElement synchronously inside the tap handler so iOS Safari plays after the async fetch
-  // and ignores the physical Ring/Silent switch (Web Audio is muted on silent mode and stays suspended if resumed after fetch).
+  // Playback: unlock Web Audio synchronously inside the tap handler (with audioSession 'playback' so iOS ignores the
+  // Ring/Silent switch and bypasses AVPlayer blob: WAV quirks), and fall back to HTMLAudioElement only if Web Audio is absent.
   function playClip(id) {
     if (C.playing?.id === id) { stopPlaying(); render(); return; }
     stopPlaying();
-    if (globalThis.navigator?.audioSession) { try { globalThis.navigator.audioSession.type = 'playback'; } catch { /* unsupported */ } }
-    if (typeof globalThis.Audio === 'function' && typeof URL?.createObjectURL === 'function') {
-      const urls = [];
-      const revokeAll = () => { while (urls.length) { try { URL.revokeObjectURL(urls.pop()); } catch { /* revoked */ } } };
-      const audio = new globalThis.Audio();
-      audio.playsInline = true;
-      const silentUrl = URL.createObjectURL(new Blob([LittleDaysCry.encodeWav(new Float32Array(80), 8000)], {type: 'audio/wav'}));
-      urls.push(silentUrl);
-      audio.src = silentUrl;
-      const unlock = audio.play();
-      if (unlock && unlock.catch) unlock.catch(() => {});
-      const playing = {
-        id, stopped: false,
-        stop() {
-          playing.stopped = true;
-          audio.onended = audio.onerror = null;
-          try { audio.pause(); } catch { /* paused */ }
-          audio.removeAttribute('src');
-          try { audio.load(); } catch { /* unloaded */ }
-          revokeAll();
-        },
-      };
+    C.list.open[id] = true;
+    const player = LittleDaysCry.preparePlay();
+    if (player.ready) {
+      const playing = {id, stopped: false, stop() { playing.stopped = true; player.stop(); }};
       C.playing = playing;
       render();
-      api().clipBytes(id).then(wav => {
-        if (playing.stopped || C.playing !== playing) { revokeAll(); return; }
-        try { audio.pause(); } catch { /* paused */ }
-        revokeAll();
-        const clipUrl = URL.createObjectURL(new Blob([wav], {type: 'audio/wav'}));
-        urls.push(clipUrl);
-        audio.onended = () => { if (C.playing === playing) { stopPlaying(); render(); } };
-        audio.onerror = () => { if (C.playing === playing) { stopPlaying(); changeFailed(); render(); } };
-        audio.src = clipUrl;
-        return audio.play();
-      }).catch(() => {
-        if (playing.stopped) return;
-        if (C.playing === playing) stopPlaying(); else revokeAll();
-        changeFailed(); render();
-      });
+      api().clipBytes(id).then(wav => (playing.stopped || C.playing !== playing ? null : player.play(wav)))
+        .then(handle => {
+          if (!handle) return;
+          if (playing.stopped || C.playing !== playing) { handle.stop(); return; }
+          handle.ended.then(() => { if (C.playing === playing) { C.playing = null; render(); } });
+        })
+        .catch(() => {
+          if (playing.stopped) return;
+          if (C.playing === playing) stopPlaying(); else player.stop();
+          changeFailed(); render();
+        });
       return;
     }
-    const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    Promise.resolve(ctx.resume()).catch(() => {});
-    const playing = {id, stopped: false, handle: null, stop() { playing.stopped = true; playing.handle?.stop(); try { ctx.close(); } catch { /* closed */ } }};
+    if (typeof globalThis.Audio !== 'function' || typeof URL?.createObjectURL !== 'function') { player.stop(); return; }
+    const urls = [];
+    const revokeAll = () => { while (urls.length) { try { URL.revokeObjectURL(urls.pop()); } catch { /* revoked */ } } };
+    const audio = new globalThis.Audio();
+    audio.playsInline = true;
+    const silentUrl = URL.createObjectURL(new Blob([LittleDaysCry.encodeWav(new Float32Array(4410), 44100)], {type: 'audio/wav'}));
+    urls.push(silentUrl);
+    audio.src = silentUrl;
+    const unlock = audio.play();
+    if (unlock && unlock.catch) unlock.catch(() => {});
+    const playing = {
+      id, stopped: false,
+      stop() {
+        playing.stopped = true;
+        audio.onended = audio.onerror = null;
+        try { audio.pause(); } catch { /* paused */ }
+        audio.removeAttribute('src');
+        try { audio.load(); } catch { /* unloaded */ }
+        revokeAll();
+        player.stop();
+      },
+    };
     C.playing = playing;
     render();
-    api().clipBytes(id).then(wav => (playing.stopped || C.playing !== playing ? null : LittleDaysCry.play(wav, {AudioContext: function made() { return ctx; }})))
-      .then(handle => {
-        if (!handle) { try { ctx.close(); } catch { /* closed */ } return; }
-        if (playing.stopped || C.playing !== playing) { handle.stop(); return; }
-        playing.handle = handle;
-        handle.ended.then(() => { if (C.playing === playing) { C.playing = null; render(); } });
-      })
-      .catch(() => { if (playing.stopped) return; if (C.playing === playing) stopPlaying(); else try { ctx.close(); } catch { /* closed */ } changeFailed(); render(); });
+    api().clipBytes(id).then(wav => {
+      if (playing.stopped || C.playing !== playing) { revokeAll(); return; }
+      try { audio.pause(); } catch { /* paused */ }
+      revokeAll();
+      const clipUrl = URL.createObjectURL(new Blob([wav], {type: 'audio/wav'}));
+      urls.push(clipUrl);
+      audio.onended = () => { if (C.playing === playing) { stopPlaying(); render(); } };
+      audio.onerror = () => { if (C.playing === playing) { stopPlaying(); changeFailed(); render(); } };
+      audio.src = clipUrl;
+      try { audio.load(); } catch { /* load */ }
+      return audio.play();
+    }).catch(() => {
+      if (playing.stopped) return;
+      if (C.playing === playing) stopPlaying(); else { revokeAll(); player.stop(); }
+      changeFailed(); render();
+    });
   }
 
   /* ---------- the sheets: first use, delete all clips, delete one cry ---------- */

@@ -19,7 +19,7 @@ import type { Store } from './store.ts';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ID = '([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})';
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
-const ANSWERS = ['feed', 'diaper', 'sleep', 'burp', 'gas', 'held', 'nothing'];
+const ANSWERS = ['feed', 'diaper', 'sleep', 'burp', 'gas', 'poop', 'held', 'nothing'];
 const MINUTE = 60_000;
 const MAX_CLIP_BYTES = 2 * 1024 * 1024;
 const GOAL = 100;
@@ -287,7 +287,7 @@ export function createCries({ store, now = Date.now }: { store: Store; now?: () 
     return JSON.stringify(cries.marks(row.id)) !== before;
   }
 
-  // An answer is one of the seven words. An empty answer needs `was`, the answer that it removes.
+  // An answer is one of the eight words. An empty answer needs `was`, the answer that it removes.
   function answerOf(input: Obj, session: Session) {
     const value = input.stoppedBy;
     if (value === undefined) { if (input.was !== undefined) throw bad('Send was only with an empty answer.'); return undefined; }
@@ -295,7 +295,7 @@ export function createCries({ store, now = Date.now }: { store: Store; now?: () 
       if (typeof input.was !== 'string' || !ANSWERS.includes(input.was)) throw bad('Send the answer that Undo removes.');
       return { value: null, at: null, by: null, was: input.was };
     }
-    if (typeof value !== 'string' || !ANSWERS.includes(value) || input.was !== undefined) throw bad('Choose one of the seven answers.');
+    if (typeof value !== 'string' || !ANSWERS.includes(value) || input.was !== undefined) throw bad('Choose one of the eight answers.');
     return { value, at: new Date(now()).toISOString(), by: session.adult };
   }
 
