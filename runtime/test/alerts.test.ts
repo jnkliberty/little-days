@@ -130,7 +130,7 @@ function makeFixture(opts: {
   };
   const fetchImpl: typeof fetch = opts.fetchImpl ?? (async (url, init) => pushResponder(String(url), init));
 
-  const sessions = createSessionService({ store, babyBuddy, accounts });
+  const sessions = createSessionService({ store, babyBuddy, accounts, now });
   const records = createRecords({ store, sessions, now: () => new Date(now()) });
   const alerts = createAlerts({
     store,
@@ -778,6 +778,7 @@ test('resource classification covers update/delete/split/takeOverStops, recovere
         async request() { return []; },
       },
       accounts: [{ username: 'Sage', password: 'pw1' }],
+      now: f.now,
     });
     const sentRemoved: string[] = [];
     const alertsNoRowan = createAlerts({

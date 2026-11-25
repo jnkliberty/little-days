@@ -216,7 +216,7 @@ def audit_open_and_long_swipe(browser, base):
     }""", ROW.format("feedings:11"))
     check(f"the revealed Delete is 72 px or wider, as tall as the row, on screen and tappable: {shape}", shape["w"] >= 72 and abs(shape["h"] - shape["rowH"]) <= 2 and shape["inside"] and shape["hit"])
     check(f"the revealed Delete has the trash glyph and the word: {shape['text']!r}", shape["glyph"] and shape["text"] == "Delete")
-    check(f"its accessible name names the record: {shape['name']!r}", shape["name"] == "Delete Bottle · 120 ml, 8:40 AM")
+    check(f"its accessible name names the record: {shape['name']!r}", shape["name"] == "Delete Bottle · 120 mL, 8:40 AM")
     check("it is a real button in the accessibility tree while open", page.get_by_role("button", name=re.compile("^Delete Bottle")).count() == 1)
     swipe_left(page, "sleep:14")
     check(f"a sleep row's name keeps a space where its time wraps: {delete_button(page, 'sleep:14').get_attribute('aria-label')!r}", delete_button(page, "sleep:14").get_attribute("aria-label") == "Delete Nap, 5:00 AM to 6:00 AM")

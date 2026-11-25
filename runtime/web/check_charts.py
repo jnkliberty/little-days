@@ -200,7 +200,7 @@ def audit_glance(page, state):
         check(f'G1 {lang} three icon rows with the daily averages', strong == want, strong)
         subs = [[s.replace(' ', ' ') for s in li.locator('.sub').all_text_contents()] for li in page.locator('[data-chart="glance"] li').all()]
         gap = 'Usual gap 1 h' if lang == 'en' else 'Intervalo habitual 1 h'
-        bottle = '100 ml from the bottle' if lang == 'en' else '100 ml de biberón'
+        bottle = '100 mL from the bottle' if lang == 'en' else '100 mL de biberón'
         check(f'G2 {lang} the feed row has the bottle ml, then the usual gap (the middle gap between feed starts in the 7 full days); the others keep their one line',
               subs[0] == [bottle, gap] and subs[1] == [('Longest sleep 8 h' if lang == 'en' else 'Sueño más largo 8 h')] and subs[2] == [('Diapers' if lang == 'en' else 'Pañales')], subs)
         check(f'G2 {lang} the usual gap line is the one marked R2', page.locator('[data-chart="glance"] [data-r="R2"]').count() == 1
@@ -569,7 +569,7 @@ def audit_clock(page, state):
     before = page.evaluate('S.chartRows.at(-1).date')
     average = page.locator('[data-chart="glance"] li .sub', has_text='from the bottle').all_text_contents()
     check('C7 before 7 AM today is yesterday and is excluded from the average',
-          before == '2026-11-17' and average == ['60 ml from the bottle'], {'date': before, 'average': average})
+          before == '2026-11-17' and average == ['60 mL from the bottle'], {'date': before, 'average': average})
     page.evaluate('''()=>{window.clockRenders=0;window.clockRender=render;
       render=()=>{window.clockRenders++;window.clockRender()};}''')
     page.clock.set_fixed_time('2026-11-18T13:01:00Z')
@@ -578,7 +578,7 @@ def audit_clock(page, state):
     check('C7 unchanged server data still renders after the clock changes', page.evaluate('window.clockRenders>0'))
     check('C7 the next tick moves today to the new 7 AM day', page.evaluate('S.chartRows.at(-1).date') == '2026-11-18')
     check('C7 the average includes the day that just ended',
-          page.locator('[data-chart="glance"] li .sub', has_text='from the bottle').all_text_contents() == ['100 ml from the bottle'])
+          page.locator('[data-chart="glance"] li .sub', has_text='from the bottle').all_text_contents() == ['100 mL from the bottle'])
     check('C7 the so-far end moves to 7:01 AM', page.evaluate('rhythmRows(S.chartRows).at(-1).until') == 1)
     page.clock.set_fixed_time('2026-11-18T13:03:00Z')
     page.evaluate('()=>tick()')

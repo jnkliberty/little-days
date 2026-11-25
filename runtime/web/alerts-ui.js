@@ -260,7 +260,7 @@ window.LittleDaysAlertsUI = (() => {
         `<button type="button" class="chip" data-act="alerts-switch" data-arg="${key}:${val}" aria-pressed="${pressed}">${glyph('check')}${esc(word)}</button>`;
       return `<div class="al-type-row">
         <div class="al-type-head"><strong>${esc(L(lang, label))}</strong><span>${esc(L(lang, sub))}</span></div>
-        <div class="chips" role="group" aria-label="${esc(L(lang, label))}">
+        <div class="chips seg-control" role="group" aria-label="${esc(L(lang, label))}">
           ${chip('on', isOn, L(lang, 'on'))}${chip('off', !isOn, L(lang, 'off'))}
         </div>
       </div>`;

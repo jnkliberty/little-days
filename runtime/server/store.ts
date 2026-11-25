@@ -207,8 +207,8 @@ export function openStore(path: string) {
       if (!row) return null;
       return { adult: String(row.adult), babyBuddyUserId: Number(row.babybuddy_user_id), csrfHash: String(row.csrf_hash), expiresAt: Number(row.expires_at) };
     },
-    liveSessionHashesForUser(userId: number): string[] {
-      return (db.prepare('SELECT id_hash FROM sessions WHERE babybuddy_user_id = ? AND expires_at > ?').all(userId, Date.now()) as { id_hash: string }[]).map(row => row.id_hash);
+    liveSessionHashesForUser(userId: number, nowMs = Date.now()): string[] {
+      return (db.prepare('SELECT id_hash FROM sessions WHERE babybuddy_user_id = ? AND expires_at > ?').all(userId, nowMs) as { id_hash: string }[]).map(row => row.id_hash);
     },
     deleteSession(sessionId: string): void {
       db.prepare('DELETE FROM sessions WHERE id_hash = ?').run(hashSecret(sessionId));

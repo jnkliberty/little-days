@@ -307,3 +307,30 @@ test('a refused Baby Buddy password ends the sign-in instead of trying again on 
     assert.deepEqual(log, ['login Rowan', 'login Rowan'], 'the refused password was tried once, not on every poll');
   } finally { store.close(); }
 });
+
+test('injected now clock governs login CSRF, session expiry, renewal, and identityForUser regardless of wall clock', async () => {
+  let clock = Date.UTC(2020, 0, 1, 12);
+  const store = openStore(':memory:');
+  const bb = fakeBabyBuddy();
+  const sessions = createSessionService({ store, babyBuddy: bb.client, accounts: household, now: () => clock });
+  try {
+    const expiredCsrf = sessions.issueLoginCsrf();
+    clock += 10 * 60 * 1000;
+    await assert.rejects(sessions.select('Rowan', expiredCsrf), /Invalid CSRF token/);
+
+    const { sessionId } = await sessions.select('Rowan', sessions.issueLoginCsrf());
+    assert.equal(store.getSession(sessionId)!.expiresAt, clock + 30 * DAY, 'login expiresAt uses injected clock');
+    assert.ok(sessions.get(sessionId), 'session under a past injected clock stays live');
+
+    // Before renew() or identityForUser(), advancing 12 days must trigger upstream re-login (proves login usedAt used injected clock).
+    clock += 12 * DAY;
+    await sessions.request(sessionId, { resource: 'changes', method: 'GET' });
+    assert.deepEqual(bb.log, ['login Rowan', 'login Rowan', 'logout bb-1', 'request bb-2'], 'login usedAt and upstream idle timeout use injected clock');
+    assert.equal((await sessions.identityForUser(7)).id, 7);
+
+    sessions.renew(sessionId);
+    assert.equal(store.getSession(sessionId)!.expiresAt, clock + 30 * DAY, 'renew expiresAt uses injected clock');
+    clock += 30 * DAY;
+    assert.equal(sessions.get(sessionId), null, 'session expires at 30 days on injected clock');
+  } finally { store.close(); }
+});

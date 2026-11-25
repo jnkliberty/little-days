@@ -164,15 +164,16 @@ const W = {
 const t = (k, ...a) => { const v = W[k][S.lang === 'es' ? 1 : 0]; return typeof v === 'function' ? v(...a) : v; };
 const tt = (grp, k) => W[grp][k][S.lang === 'es' ? 1 : 0];
 
-function childSetupHTML(){if(!resourceAllowed('children','add'))return `<div class="shell-card" role="status" lang="${S.lang}"><h1>${t('setupTitle')}</h1><p>${t('waitingProfile')}</p></div>`;const d=S.setupDraft||{};return `<form class="shell-card" id="child-form" lang="${S.lang}"><h1>${t('setupTitle')}</h1><label>${t('firstName')}<input name="firstName" maxlength="255" value="${esc(d.firstName||'')}" required ${S.busy?'disabled':''}></label><label>${t('birthDate')}<input name="birthDate" type="date" min="${dayISO(-1095)}" max="${dayISO(0)}" value="${esc(d.birthDate||'')}" required ${S.busy?'disabled':''}></label><label>${t('dueDate')}<input name="dueDate" type="date" value="${esc(d.dueDate||'')}" ${S.busy?'disabled':''}></label><button class="btn solid" type="submit" ${S.busy?'disabled':''}>${S.busy?t('saving'):t('saveChild')}</button></form>`;}
+function shellBrandHTML(){return `<div class="shell-brand">${LittleDaysBunny.svg('shell-bunny').replace(' data-idle','')}<span class="shell-brand-name">Little Days</span></div>`;}
+function childSetupHTML(){if(!resourceAllowed('children','add'))return `<div class="shell-card" role="status" lang="${S.lang}">${shellBrandHTML()}<h1>${t('setupTitle')}</h1><p>${t('waitingProfile')}</p></div>`;const d=S.setupDraft||{};return `<form class="shell-card" id="child-form" lang="${S.lang}">${shellBrandHTML()}<h1>${t('setupTitle')}</h1><label>${t('firstName')}<input name="firstName" maxlength="255" value="${esc(d.firstName||'')}" required ${S.busy?'disabled':''}></label><label>${t('birthDate')}<input name="birthDate" type="date" min="${dayISO(-1095)}" max="${dayISO(0)}" value="${esc(d.birthDate||'')}" required ${S.busy?'disabled':''}></label><label>${t('dueDate')}<input name="dueDate" type="date" value="${esc(d.dueDate||'')}" ${S.busy?'disabled':''}></label><button class="btn solid" type="submit" ${S.busy?'disabled':''}>${S.busy?t('saving'):t('saveChild')}</button></form>`;}
 // S.people holds names from GET /api/session or person objects from the family state; the picker shows names.
 // Two steps: the household passcode first, then the adult names that the server returns for a correct passcode.
 // The passcode stays in memory only, never in the page, and is dropped when the sign-in finishes.
 let householdPasscode='';
 function loginHTML() {
   const error=S.message?`<p class="shell-error" role="alert">${ic('warn')}${esc(S.message)}</p>`:'';
-  if(!S.people.length)return `<form class="shell-card shell-signin" id="passcode-form" lang="${S.lang}"><h1>${t('passcodeTitle')}</h1>${error}<label>${t('passcodeLabel')}<input name="passcode" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required></label><button class="btn solid" type="submit">${t('signInGo')}</button></form>`;
-  return `<form class="shell-card shell-signin" id="login-form" lang="${S.lang}"><h1>${t('signIn')}</h1>${error}<label>${t('username')}<select name="username" required>${S.people.map(personName).filter(Boolean).map(person=>`<option value="${esc(person)}"${person===S.loginUser?' selected':''}>${esc(shownName(person))}</option>`).join('')}</select></label><button class="btn solid" type="submit">${t('signInGo')}</button></form>`;
+  if(!S.people.length)return `<form class="shell-card shell-signin" id="passcode-form" lang="${S.lang}">${shellBrandHTML()}<h1>${t('passcodeTitle')}</h1>${error}<label>${t('passcodeLabel')}<input name="passcode" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required></label><button class="btn solid" type="submit">${t('signInGo')}</button></form>`;
+  return `<form class="shell-card shell-signin" id="login-form" lang="${S.lang}">${shellBrandHTML()}<h1>${t('signIn')}</h1>${error}<label>${t('username')}<select name="username" required>${S.people.map(personName).filter(Boolean).map(person=>`<option value="${esc(person)}"${person===S.loginUser?' selected':''}>${esc(shownName(person))}</option>`).join('')}</select></label><button class="btn solid" type="submit">${t('signInGo')}</button></form>`;
 }
 // With the passcode off (S.passcodeOff, from the server), the picker comes back with fresh names. With no answer, the connection screen
 // offers Retry. A reply that says the passcode is on again shows the passcode form.
@@ -599,6 +600,7 @@ const GLYPH = {
   plus: '<path d="M12 5.2v13.6M5.2 12h13.6"/>',
   trash: '<path d="M5.5 7.5h13M9.5 7.5V5.8c0-.6.4-1 1-1h3c.6 0 1 .4 1 1v1.7M7.3 7.5l.8 10.9c.1.8.7 1.3 1.4 1.3h5c.7 0 1.3-.5 1.4-1.3l.8-10.9M10.4 11v5.4M13.6 11v5.4"/>',
   gear: '<path d="M10.29 5.62L10.69 3.70L13.31 3.70L13.71 5.62A6.60 6.60 0 0 1 15.30 6.28L16.94 5.20L18.80 7.06L17.72 8.70A6.60 6.60 0 0 1 18.38 10.29L20.30 10.69L20.30 13.31L18.38 13.71A6.60 6.60 0 0 1 17.72 15.30L18.80 16.94L16.94 18.80L15.30 17.72A6.60 6.60 0 0 1 13.71 18.38L13.31 20.30L10.69 20.30L10.29 18.38A6.60 6.60 0 0 1 8.70 17.72L7.06 18.80L5.20 16.94L6.28 15.30A6.60 6.60 0 0 1 5.62 13.71L3.70 13.31L3.70 10.69L5.62 10.29A6.60 6.60 0 0 1 6.28 8.70L5.20 7.06L7.06 5.20L8.70 6.28A6.60 6.60 0 0 1 10.29 5.62ZM12 9.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Z"/>',
+  pencil: '<path d="M5 19h3.5L18.2 9.3a1.8 1.8 0 0 0 0-2.5l-1-1a1.8 1.8 0 0 0-2.5 0L5 15.5V19ZM13.5 7l3.5 3.5"/>',
 };
 const glyph = n => `<svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g class="ln">${GLYPH[n]}</g></svg>`;
 const drawnArt = n => { const [tilt, shape, line] = DRAWN[n]; return `<g transform="rotate(${tilt} 12 12)"><path class="shape" transform="translate(1.44 1) scale(1.1)" d="${shape}"/><g class="ln">${line}</g></g>`; };
@@ -643,10 +645,10 @@ const c2f = c => c * 9 / 5 + 32, f2c = f => (f - 32) * 5 / 9;
 const meKey=()=>String(typeof S.me==='object'?(S.me?.id||personName(S.me)):S.me);
 const unitsOf = () => S.units[meKey()] || S.preferences.units || 'metric';
 const DEFU = {temp: u => u === 'us' ? 'F' : 'C', vol: u => u === 'us' ? 'oz' : 'ml', wt: u => u === 'us' ? 'lb' : 'kg', len: u => u === 'us' ? 'in' : 'cm'};
-const uLab = u => u === 'in' && S.lang === 'es' ? 'pulg' : u === 'F' || u === 'C' ? '°' + u : u;
+const uLab = u => u === 'ml' ? 'mL' : u === 'in' && S.lang === 'es' ? 'pulg' : u === 'F' || u === 'C' ? '°' + u : u;
 const fmtTemp = (c, u = DEFU.temp(unitsOf())) => u === 'F' ? `${(Math.round(c2f(c) * 10) / 10).toFixed(1)} °F` : `${c.toFixed(1)} °C`;
 const volNum = (ml, u) => u === 'oz' ? trimN(rnd((+ml || 0) / ML, .1)) : trimN(+ml || 0);
-const fmtVol = (ml, u = DEFU.vol(unitsOf())) => `${volNum(ml, u)} ${u}`;
+const fmtVol = (ml, u = DEFU.vol(unitsOf())) => `${volNum(ml, u)} ${uLab(u)}`;
 const ozOf = kg => Math.round(kg / OZ_KG);
 const fmtWt = (kg, u = DEFU.wt(unitsOf())) => u === 'lb' ? `${Math.floor(ozOf(kg) / 16)} lb ${ozOf(kg) % 16} oz` : `${kg.toFixed(2)} kg`;
 const fmtLen = (cm, u = DEFU.len(unitsOf())) => u === 'in' ? `${trimN(rnd(cm / 2.54, .25))} ${uLab('in')}` : `${cm.toFixed(1)} cm`;
@@ -980,7 +982,7 @@ async function submitChat(index){
 // One closed "Sources" control holds the date range and the references of an answer.
 function chatSourcesHTML(m,i){
   const period=m.period?.label?`<p class="chat-period">${esc(m.period.label)}</p>`:'',refs=m.references.map(ref=>referenceHTML(ref)).join('');
-  return period||refs?`<details class="chat-sources" data-chat-sources="${i}"${m.open?' open':''}><summary>${t('aiSources')}</summary>${period}${refs?`<div class="chat-references">${refs}</div>`:''}</details>`:'';
+  return period||refs?`<details class="chat-sources" data-chat-sources="${i}"${m.open?' open':''}><summary>${t('aiSources')}${glyph('chev')}</summary>${period}${refs?`<div class="chat-references">${refs}</div>`:''}</details>`:'';
 }
 // Under a question with no answer: the loading line, or its error and, where a retry can work, Try again.
 // Try again waits while another question is loading, so only one request runs.
@@ -1027,7 +1029,10 @@ function runCardHTML(kind) {
   }
   const title=feed?t('runFeeding',r.side):t('asleep');
   const button=feed?secondary('open-feed',t('changeSideTime')):secondary('pause-sleep',ft('pauseSleep'),canStartTimer()?'':'x');
-  return `<section class="card run-card ${feed?'t-feed':'t-sleep'}" aria-label="${title}" data-r="R1">${iconBare(feed?(r.side==='bottle'?'bottle':'nurse'):'moon')}<div><h2>${title}</h2><p class="clock" role="timer" data-live="${feed?'run':'sleep'}">${mmss(timerElapsed(r))}</p><span class="sub">${t('feedStarted',clk(r.t0),esc(shownName(r.by)))}</span></div>${button}</section>`;
+  // A tap on the timer opens Change start in the sheet: a forgotten timer is fixed from Home (owner, 2026-11-24).
+  const started=t('feedStarted',clk(r.t0),esc(shownName(r.by))),clock=`<span class="clock" role="timer" data-live="${feed?'run':'sleep'}">${mmss(timerElapsed(r))}</span>`;
+  const time=resourceAllowed('timers','change')?`<button type="button" class="run-edit" data-act="open-change-start" data-arg="${feed?'feed':'sleep'}"><span class="sr-only">${t('changeStart')}. </span>${clock}<span class="sub">${started}${glyph('pencil')}</span></button>`:`${clock}<span class="sub">${started}</span>`;
+  return `<section class="card run-card ${feed?'t-feed':'t-sleep'}" aria-label="${title}" data-r="R1">${iconBare(feed?(r.side==='bottle'?'bottle':'nurse'):'moon')}<div><h2>${title}</h2>${time}</div>${button}</section>`;
 }
 const tileHTML=()=>[['t-feed','open-feed','bottle','feed'],['t-sleep','open-sleep','moon','sleep'],['t-dia','open-dia','diaper','diaper']]
   .map(([cls,act,art,word])=>`<button type="button" class="tile ${cls}" data-act="${act}">${iconBare(art)}${t(word)}</button>`).join('');
@@ -1074,7 +1079,7 @@ function homeHTML() {
   const first=homeHeader()+(runs.length?`<div class="group">${runs.join('')}</div>`:'')+tiles+(question||insight);
   return `<div class="wrap">${first}${question?insight:''}${body}${LittleDaysReportsUI.homeCardHTML()}${homeNav()}</div>`;
 }
-function themeRow(){const m=themeMode();return `<div class="theme-row"><span class="fl" id="theme-label">${t('themeTitle')}</span><div class="seg3" role="group" aria-labelledby="theme-label">${[['auto','themeAuto'],['on','themeOn'],['off','themeOff']].map(([k,w])=>`<button type="button" class="chip" data-act="theme" data-arg="${k}" aria-pressed="${m===k}">${ic('check','ck')}${t(w)}</button>`).join('')}</div><p>${t('themeHint')}</p></div>`;}
+function themeRow(){const m=themeMode();return `<div class="theme-row"><span class="fl" id="theme-label">${t('themeTitle')}</span><div class="seg3 seg-control" role="group" aria-labelledby="theme-label">${[['auto','themeAuto'],['on','themeOn'],['off','themeOff']].map(([k,w])=>`<button type="button" class="chip" data-act="theme" data-arg="${k}" aria-pressed="${m===k}">${ic('check','ck')}${t(w)}</button>`).join('')}</div><p>${t('themeHint')}</p></div>`;}
 function upcomingAppointmentsHTML(){
   const next=[...(S.upcomingAppointments||[])].sort((a,b)=>a.t-b.t)[0];
   if(!next||!resourceAllowed('notes','view'))return '';
@@ -1139,7 +1144,7 @@ function tlSleepParts(e,c,lo) {
 // A record with no care color: medicine, temperature, growth, a reminder, and the other kinds.
 function tlOtherParts(e,c) {
   const medNext=e.type==='med'?LittleDaysAlertsUI.medNextReadout(e,{lang:S.lang,zone:LittleDaysZone.get(),esc,localISOAt}):'';
-  const r=e.type==='other'?otherRow(e):e.type==='med'?{icn:'med',title:t('medicine'),det:`${esc(e.name)}, ${esc(e.dose)} ${esc(e.unit||'')}`}:e.type==='temp'?{icn:'temp',title:t('temp'),det:fmtTemp(e.c)}
+  const r=e.type==='other'?otherRow(e):e.type==='med'?{icn:'med',title:t('medicine'),det:`${esc(e.name)}, ${esc(e.dose)} ${esc(e.unit==='ml'?'mL':e.unit||'')}`}:e.type==='temp'?{icn:'temp',title:t('temp'),det:fmtTemp(e.c)}
     :e.type==='growth'?{icn:'ruler',title:t('growth'),det:[e.kg!=null&&fmtWt(e.kg),e.cm!=null&&fmtLen(e.cm),e.head!=null&&fmtLen(e.head)].filter(Boolean).join(' · ')}
     :{icn:'sleep',title:`${t('recipient')} · ${t(e.what)}`,det:`${esc(shownName(e.recipient))} · ${dateLabel(dayOf(e.t))} ${clockAt(e.hour,e.minute,e.period)}`};
   return ['t-plain','',r.icn,r.title,tlJoin([r.det,c.by])+medNext+c.note,tlTime(e)];
@@ -1624,7 +1629,7 @@ Object.assign(W,{
   hintMinutes:['Enter the minutes to save.','Escriba los minutos para guardar.'],
   amountIn:[u=>`Amount in ${u}`,u=>`Cantidad en ${u}`],leftIn:[u=>`Left in ${u}`,u=>`Izquierdo en ${u}`],rightIn:[u=>`Right in ${u}`,u=>`Derecho en ${u}`],
   commonAmounts:['Common amounts','Cantidades comunes'],
-  amountRange:[u=>u==='oz'?'Enter an amount from 1 to 13 oz.':'Enter an amount from 1 to 400 ml.',u=>u==='oz'?'Escriba una cantidad de 1 a 13 oz.':'Escriba una cantidad de 1 a 400 ml.'],
+  amountRange:[u=>u==='oz'?'Enter an amount from 1 to 13 oz.':'Enter an amount from 1 to 400 mL.',u=>u==='oz'?'Escriba una cantidad de 1 a 13 oz.':'Escriba una cantidad de 1 a 400 mL.'],
   startedL:['Started','Inicio'],endedL:['Ended','Fin'],dayL:['Day','Día'],changedL:['Changed','Cambio'],
   saveFeed:['Save feed','Guardar toma'],savePumping:['Save pumping','Guardar extracción'],saveDiaper:['Save diaper','Guardar pañal'],saveSleep:['Save sleep','Guardar sueño'],
   startSleep:['Start sleep','Iniciar sueño'],enterTimes:['Enter the times','Escribir las horas'],
@@ -1843,7 +1848,7 @@ function sleepSheet(s) {
     const rangeOk=validDurationRange(s,'manualDate','hour','minute','period','manualDuration');
     syncManualNap(s);
     // Round 3: Type is a read-only line that follows the start time. The Nap and Night sleep choice stays in More details.
-    const type=`<div class="form-field"><span class="fl">${t('typeL')}</span><p class="readonly" id="sleep-kind">${s.nap===false?t('night'):s.nap===true?t('nap'):'—'}</p></div>`;
+    const type=`<div class="form-field"><span class="fl">${t('typeL')}</span><p class="readonly" id="sleep-kind">${s.nap===false?t('night'):s.nap===true?t('nap'):t('notSet')}</p></div>`;
     const kinds=`<div class="form-field"><span class="fl" id="sleep-kind-label">${t('sleepKind')}</span><div class="pair" role="group" aria-labelledby="sleep-kind-label">${chipB('nap','night',s.nap===false,t('night'))}${chipB('nap','nap',s.nap===true,t('nap'))}</div></div>`;
     return sheetShell(t('sleep'),`${startedField(s)}${endedField(s)}${type}${moreDetails(s,{extra:true,head:kinds})}`,{label:t('saveSleep'),on:s.nap!==null&&rangeOk,after:canStartTimer()?formLink(t('useTimer'),'manual'):''});
   }
@@ -1875,7 +1880,7 @@ function settingsSheet(s) {
   const err=S.photoBusy?`<p role="status" class="photo-prep">${t('photoPrep')}</p>`:pd&&!mayChange?`<p role="alert">${t('photoNotAllowed')}</p>`:S.portraitError?`<p role="alert">${photoErrorText(S.portraitError)}</p>`:'';
   const group=(title,inner,cls='')=>`<section class="day"><h2>${title}</h2><div class="card ${cls}">${inner}</div></section>`;
   const preference=(title,inner)=>`<section class="day"><h2>${title}</h2>${inner}</section>`;
-  const pick=(key,list,cur)=>`<div class="chips" role="group">${list.map(([v,w])=>`<button type="button" class="chip" data-setting="${key}" data-value="${v}" data-focus="setting-${key}-${v}" aria-pressed="${cur===v}">${glyph('check')}${w}</button>`).join('')}</div>`;
+  const pick=(key,list,cur)=>`<div class="chips seg-control" role="group">${list.map(([v,w])=>`<button type="button" class="chip" data-setting="${key}" data-value="${v}" data-focus="setting-${key}-${v}" aria-pressed="${cur===v}">${glyph('check')}${w}</button>`).join('')}</div>`;
   const nav=(inner,attr)=>`<ul><li><button type="button" class="nav-row" ${attr}><span>${inner}</span><span class="chev">${glyph('chev')}</span></button></li></ul>`;
   const age=ageText(),name=babyName();
   const dim=LittleDaysTheme.mode(),dimWord=dim==='on'?t('themeOn'):dim==='off'?t('themeOff'):t('themeAuto');
@@ -1886,7 +1891,7 @@ function settingsSheet(s) {
     ${group(t('baby'),`<div class="row t-plain">${portraitImg}<div><strong>${esc(name)}</strong>${age?`<span class="sub">${age}</span>`:''}</div>${change}</div>${draft}${err}`)}
     <div class="card settings-preferences">
     ${preference(t('language'),pick('lang',[['en','English'],['es','Español']],S.lang))}
-    ${preference(t('unitsL'),pick('units',[['metric','ml'],['us','oz']],unitsOf()))}
+    ${preference(t('unitsL'),pick('units',[['metric','mL'],['us','oz']],unitsOf()))}
     ${preference(t('nightL'),nav(`<strong>${t('dimSchedule')}</strong><span class="sub">${dimWord}</span>`,'data-act="night-open"'))}
     ${nightOpen?`<section class="settings-card" data-night>${themeRow()}<button type="button" class="chip" data-setting="night" data-focus="setting-night" aria-pressed="${S.night}">${glyph('check')}${t('nightRules')}</button></section>`:''}
     </div>
@@ -1923,7 +1928,7 @@ function careSheet() {
   if(S.careLoading)return sheetShell(t('careTitle'),`<p role="status">${t('loading')}</p>`,null);
   if(!S.careData)return sheetShell(t('careTitle'),`<p role="alert">${esc(S.careError||t('careUnavailable'))}</p><button class="btn" type="button" data-act="care-refresh">${t('retry')}</button>`,null);
   const data=S.careData,confirmations=data.confirmations||[],history=data.dutyHistory||[];
-  const list=confirmations.length?confirmations.map(item=>`<li><time>${esc(careDateTime(item.start))} – ${esc(careDateTime(item.end))}</time> <button class="btn" type="button" data-act="care-revoke" data-arg="${esc(item.id)}" ${S.careLoading?'disabled':''}>${t('revoke')}</button></li>`).join(''):`<li>${t('careEmpty')}</li>`;
+  const list=confirmations.length?confirmations.map(item=>`<li><time>${esc(careDateTime(item.start))} ${t('tlTo')} ${esc(careDateTime(item.end))}</time> <button class="btn" type="button" data-act="care-revoke" data-arg="${esc(item.id)}" ${S.careLoading?'disabled':''}>${t('revoke')}</button></li>`).join(''):`<li>${t('careEmpty')}</li>`;
   const handoffs=history.map(item=>`<li><time>${esc(careDateTime(item.occurredAt))}</time>&nbsp;· ${esc(shownName(item.who))}${item.note?`&nbsp;· ${esc(item.note)}`:''}&nbsp;· ${esc(shownName(item.adult))}</li>`).join('')||`<li>${t('careEmpty')}</li>`;
   const start=S.sheet?.careStart||'',end=S.sheet?.careEnd||'';
   return sheetShell(t('careTitle'),`<p><strong>${t('currentDuty')}:</strong> ${esc(shownName(S.duty||S.me))}</p><section class="care-share"><h3>${t('careShare')}</h3><button class="btn" type="button" data-act="care-toggle" aria-pressed="${data.exportOptIn===true}" ${S.careLoading?'disabled':''}>${data.exportOptIn?t('shareOn'):t('shareOff')}</button></section><section><h3>${t('careConfirm')}</h3>${careClockFields('careStart',start)}${careClockFields('careEnd',end)}<button class="btn solid" type="button" data-act="care-confirm" ${S.careLoading||!start||!end?'disabled':''}>${t('careConfirm')}</button></section><section><h3>${t('careListTitle')}</h3><ul class="care-list">${list}</ul></section><section><h3>${t('careHistory')}</h3><ul class="care-list">${handoffs}</ul></section>${S.message?`<p role="status">${esc(S.message)}</p>`:''}`,null);
@@ -1974,7 +1979,7 @@ function quickSheet(s) {
 }
 function medSheet(s) {
   const nextField = LittleDaysAlertsUI.medNextFieldHTML({id:'next',value:s.next,lang:S.lang,glyph,esc});
-  const body = field('name',t('medName'),s.name||'') + field('dose',t('dose'),s.dose||'','number','min="0.01" step="any"') + choices('unit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','ml'],['tablets','tablets'],['drops','drops']],s.unit||'') + nextField + field('medDate',t('date'),s.date||dayISO(0),'date') + clockChoices('med',s.hour??'3',s.minute??'20',s.period||'PM') + loggedByFields(s) + noteBlock(s,field('medNote',t('note'),s.note||''),s.note);
+  const body = field('name',t('medName'),s.name||'') + field('dose',t('dose'),s.dose||'','number','min="0.01" step="any"') + choices('unit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','mL'],['tablets','tablets'],['drops','drops']],s.unit||'') + nextField + field('medDate',t('date'),s.date||dayISO(0),'date') + clockChoices('med',s.hour??'3',s.minute??'20',s.period||'PM') + loggedByFields(s) + noteBlock(s,field('medNote',t('note'),s.note||''),s.note);
   return sheetShell(t('medicine'), body, {label:t('save'), on:!!(s.name||'').trim() && positive(s.dose) && ['mg','ml','tablets','drops'].includes(s.unit) && LittleDaysAlertsUI.validMedNext(s.next) && validEventDateTime(s)});
 }
 function tempSheet(s) {
@@ -2114,7 +2119,7 @@ function editSheet(s) {
     main=pairChips('editSide',t('sideL'),[['L',t('left')],['R',t('right')],...(e.side==='B'||s.valueSide==='B'?[['B',t('bothBreasts')]]:[])],s.valueSide)+field('valueDur',t('minutesL'),s.valueDur??'','number','min="0" step="any" inputmode="numeric"')+started;
     more=day+ended+by+note;
   }else if(e.type==='sleep'){
-    const type=`<div class="form-field"><span class="fl">${t('typeL')}</span><p class="readonly" id="sleep-kind">${s.valueNap===true?t('nap'):s.valueNap===false?t('night'):'—'}</p></div>`;
+    const type=`<div class="form-field"><span class="fl">${t('typeL')}</span><p class="readonly" id="sleep-kind">${s.valueNap===true?t('nap'):s.valueNap===false?t('night'):t('notSet')}</p></div>`;
     main=started+ended+type;
     more=day+pairChips('editNap',t('sleepKind'),[['nap',t('nap')],['night',t('night')]],s.valueNap===true?'nap':s.valueNap===false?'night':'')+by+note;extra=true;
   }else if(e.type==='diaper'){
@@ -2154,8 +2159,8 @@ function validSplit(s){return Date.parse(s.expected.start)<splitClock(s,'woke')&
 function splitSheet(s){return sheetShell(t('splitSleep'),clockChoices('woke',s.wokeHour,s.wokeMinute,s.wokePeriod,t('wokeAt'))+clockChoices('slept',s.sleptHour,s.sleptMinute,s.sleptPeriod,t('sleptAt')),{label:t('save'),on:validSplit(s)});}
 function editFeedingFields(e,s){
   if(e.type==='feed')return choiceChips('editSide',t('feed'),[['L',t('left')],['R',t('right')],...(e.side==='B'||s.valueSide==='B'?[['B',t('bothBreasts')]]:[])],s.valueSide);
-  if(e.type==='bottle')return field('valueMl',`${t('amount')} (ml)`,s.valueMl,'number','min="1" step="any"')+choiceChips('editMilk',t('milkWhat'),[['breast',t('milkBreast')],['formula',t('milkFormula')]],s.valueMilk);
-  if(e.type==='pump')return field('valueLeftMl',`${t('left')} (ml)`,s.valueLeftMl??'','number','min="0" step="any"')+field('valueRightMl',`${t('right')} (ml)`,s.valueRightMl??'','number','min="0" step="any"');
+  if(e.type==='bottle')return field('valueMl',`${t('amount')} (mL)`,s.valueMl,'number','min="1" step="any"')+choiceChips('editMilk',t('milkWhat'),[['breast',t('milkBreast')],['formula',t('milkFormula')]],s.valueMilk);
+  if(e.type==='pump')return field('valueLeftMl',`${t('left')} (mL)`,s.valueLeftMl??'','number','min="0" step="any"')+field('valueRightMl',`${t('right')} (mL)`,s.valueRightMl??'','number','min="0" step="any"');
   if(e.type==='sleep')return choiceChips('editNap',t('sleepKind'),[['nap',t('nap')],['night',t('night')]],s.valueNap===true?'nap':s.valueNap===false?'night':'','big3');
   return '';
 }
@@ -2163,7 +2168,7 @@ function editFeedingFields(e,s){
 const colWarn = col => ['pale', 'black', 'red'].includes(col) ? `<div class="warn">${ic('warn')}${t('callPed')}</div>` : '';
 function editHealthFields(e,s){
   if(e.type==='diaper')return choiceChips('editKind',t('diaper'),[['W',t('wet')],['D',t('dirty')],['B',t('both')]],s.valueKind,'big3')+choices('valueTex',t('texture'),[['',t('notSet')],...TEXES.map(k=>[k,tt('tex',k)])],s.valueTex||'')+choices('valueCol',t('color'),[['',t('notSet')],...Object.keys(COLS).map(k=>[k,tt('col',k)])],s.valueCol||'')+`<div data-col-warn role="status">${colWarn(s.valueCol)}</div>`;
-  if(e.type==='med')return field('valueName',t('medName'),s.valueName)+field('valueDose',t('dose'),s.valueDose,'number','min="0.01" step="any"')+choices('valueUnit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','ml'],['tablets','tablets'],['drops','drops']],s.valueUnit||'')+LittleDaysAlertsUI.medNextFieldHTML({id:'valueNext',value:s.valueNext,lang:S.lang,glyph,esc});
+  if(e.type==='med')return field('valueName',t('medName'),s.valueName)+field('valueDose',t('dose'),s.valueDose,'number','min="0.01" step="any"')+choices('valueUnit',t('unit'),[['',t('chooseUnit')],['mg','mg'],['ml','mL'],['tablets','tablets'],['drops','drops']],s.valueUnit||'')+LittleDaysAlertsUI.medNextFieldHTML({id:'valueNext',value:s.valueNext,lang:S.lang,glyph,esc});
   if(e.type==='temp')return field('valueTemp',`${t('temp')} (°${s.valueTempUnit})`,s.valueTemp,'number','step="0.1"');
   if(e.type==='growth')return field('valueKg',`${t('weight')} (kg)`,s.valueKg??'','number','min="0" step="any"')+field('valueCm',`${t('length')} (cm)`,s.valueCm??'','number','min="0" step="any"')+field('valueHead',`${t('head')} (cm)`,s.valueHead??'','number','min="0" step="any"');
   return '';
@@ -2620,6 +2625,8 @@ function currentClock(){const c=clockOf(nowM());return {hour:c.hh,minute:c.mm,pe
 function dropClockText(s){for(const k of Object.keys(s))if(/Clock$/.test(k))delete s[k];}
 function editAction(arg){const e=findEntry(arg);if(e){const c=clockOf(e.t),sides=e.sideAmounts||{},editDate=dayISO(dayOf(e.t));S.sheet=S.drafts.edit?.id===e.id?S.drafts.edit:{kind:'edit',id:e.id,editDate,...c,...editEnd(e),...loadedEdit(e),loadedTime:e.type==='med'&&e.timeISO?{date:editDate,hh:c.hh,mm:c.mm,period:c.period,timeISO:e.timeISO}:null,editNote:e.type==='note'?(e.text||''):(e.note||''),editTitle:e.title||'',valueTitle:e.title||'',valueProvider:e.provider||'',valueLocation:e.location||'',valueReason:e.reason||'',valueObservations:e.observations||'',valueInstructions:e.instructions||'',valueWeightKg:e.weightKg??'',valueLengthCm:e.lengthCm??'',valueHeadCm:e.headCm??'',valueFollowUp:e.followUpDate||'',valueSide:e.side,valueDur:e.dur,valueNap:e.nap,valueCompleted:e.completed,valueFood:e.food||'',valueAmount:e.amount??'',valueMl:e.ml,valueLeftMl:sides.L??e.leftMl??'',valueRightMl:sides.R??e.rightMl??'',valueMilk:e.milk,valueKind:e.kind,valueTex:e.tex,valueCol:e.col,valueName:e.name,valueDose:e.dose,valueUnit:e.unit,valueNext:e.next!=null?String(e.next):'',valueTempUnit:DEFU.temp(unitsOf()),valueTemp:e.c!=null?String(S.units[S.me]==='us'?c2f(e.c):e.c):'',valueKg:e.kg??'',valueCm:e.cm??'',valueHead:e.head??'',valueRecipient:e.recipient,valueWhat:e.what,valueEnabled:e.enabled,valueDate:validDate(e.day)?e.day:editDate,valueHour:String(e.hour||12),valueMinute:pad(e.minute||0),valuePeriod:e.period||'AM',photo:e.photo,photoName:e.photoName};if(e.type==='reminder')void LittleDaysAlertsUI.refresh(render);}delete S.drafts.edit;}
 function sheetAction(a,arg){const s=S.sheet;switch(a){
+    // A pump timer or a manual draft would hide the picker: show the running timer's own panel (Gemini r1).
+    case 'open-change-start': if(!activeTimer(arg))break;formAction(arg==='feed'?'open-feed':'open-sleep');Object.assign(S.sheet,{manual:false},arg==='feed'?{tab:shownRun()?.side==='bottle'?'bottle':'breast'}:{});feedAction('change-start',arg);break;
     case 'split':openSplit(s);break;
     case 'ftab':{const was=allowsZeroLength(s);if(s.early==='switch')s.early=null;s.tab=arg;dropClockText(s);resetRangeOnTab(s,was);break;}
     case 'logged-by':if(!loggedByLocked(s)){s.by=arg;s.dirty=true;}break;
@@ -2953,6 +2960,8 @@ function refocus(key, typed) {
 function keepOpenPickers(open){for(const old of open){const next=[...document.querySelectorAll('#stage input[type=file]')].find(el=>el.id===old.id&&el.dataset.fid===old.dataset.fid);if(next)next.replaceWith(old);}}
 document.addEventListener('click',ev=>{if(ev.target?.type==='file')ev.target._picking=true;},true);
 document.addEventListener('cancel',ev=>{if(ev.target?.type==='file')S.overlayClosedAt=performance.now();},true);
+function syncBarScroll(sc){const bar=$('.main>.bar');if(bar)bar.classList.toggle('is-scrolled',!!sc&&sc.scrollTop>4);}
+document.addEventListener('scroll',ev=>{if(ev.target?.matches?.('[data-scroll]'))syncBarScroll(ev.target);},true);
 function render() {
   LittleDaysCryUI.checkOwner();  // each sign-in, switch and sign-out stops the last adult's cry queues and recordings
   LittleDaysReportsUI.checkOwner();
@@ -2977,6 +2986,7 @@ function render() {
   drawCharts();
   for(const saved of tableScroll){const el=document.querySelector(`[data-chart-numbers="${saved.kind}"]`);if(el){el.open=saved.open;el.querySelector('.chart-table-scroll').scrollLeft=saved.left;}}
   const sc2 = $('[data-scroll]'); if (sc2 && sc2.dataset.scroll === sc?.dataset.scroll) sc2.scrollTop = st;
+  syncBarScroll(sc2);
   LittleDaysBunny.scan();
   const sb2 = $('.sh-body,.formscreen.with-save>.wrap,.formscreen:not(.with-save)'); if (sb2 && hadSheet) sb2.scrollTop = sbt;
   if(S.busy||S.pendingSheetOperation){document.querySelectorAll('[data-sheet] input,[data-sheet] select,[data-sheet] textarea,[data-sheet] button').forEach(el=>{if(!S.busy&&!hasUnresolvedSheet(S.sheet)&&el.matches('[data-act="delete-entry"]')||el.closest('.settings-card')||el.matches('[data-act="retry-write"]')||el.matches('.portrait-file')&&portraitOpen()&&!S.pendingSheetOperation)return;const retrying=S.retrySame&&(S.retrySame===S.sheet||S.sheet?.kind==='discard'&&S.sheet.draft===S.retrySame),retrySave=retrying&&el.matches('[data-act="save"]'),discardControl=retrying&&['cancel','keep','discard'].includes(el.dataset.act);if(!retrySave&&!discardControl&&!el.matches('[data-act="undo"]'))el.disabled=true;});}

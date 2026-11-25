@@ -323,7 +323,7 @@ globalThis.LittleDaysReportsUI = (() => {
     const chips = choices.map(n =>
       `<button type="button" class="chip" data-act="report-period" data-arg="${n}" aria-pressed="${n === active}">${glyph('check')}${esc(tr(choices.length === 2 ? 'lastNDays' : 'daysN', n))}</button>`
     ).join('');
-    return `<div class="rp-period-block"><div class="rp-period-chips" role="group" aria-label="${esc(tr('periodAria'))}">${chips}</div><p class="rp-period-text">${esc(metaText)}</p></div>`;
+    return `<div class="rp-period-block"><div class="rp-period-chips seg-control" role="group" aria-label="${esc(tr('periodAria'))}">${chips}</div><p class="rp-period-text">${esc(metaText)}</p></div>`;
   }
 
   function guideCard(guide) {
@@ -438,6 +438,10 @@ globalThis.LittleDaysReportsUI = (() => {
     return sheetWrap(tr('weeklyTitle'), summary + weeklyOverviewCard(rep) + growthCard + guideCard(rep.guide));
   }
 
+  const wideReportsMQ = globalThis.matchMedia?.('(min-width: 960px)');
+  wideReportsMQ?.addEventListener?.('change', () => { if (R.kind) render(); });
+  const reportPlotWidth = () => (wideReportsMQ ? (wideReportsMQ.matches ? 640 : 326) : (globalThis.innerWidth >= 960 ? 640 : 326));
+
   /* ---------- Report 2: Sleep ---------- */
   function sleepPlot(rep) {
     const band = rep.band?.kind === 'range' ? {low: rep.band.low, high: rep.band.high, open: false} : null;
@@ -451,12 +455,12 @@ globalThis.LittleDaysReportsUI = (() => {
     };
     const labels = xLabels(rep.days);
     const rows = rep.days.map((d, i) => ({x: labels[i].x, anchor: labels[i].anchor, v: [(d.nightMin || 0) / 60, (d.napMin || 0) / 60]}));
-    return CH().reportColumns(326, tr('sleepPerDay'), rows, panel);
+    return CH().reportColumns(reportPlotWidth(), tr('sleepPerDay'), rows, panel);
   }
 
   function sleepScheduleCard(rep) {
     const lang = S.lang === 'es' ? 'es' : 'en';
-    const sub = rep.typicalBedtimeMin != null && rep.typicalWakeMin != null ? `<p class="sub" style="margin-bottom:12px">${esc(tr('bedSummary', fmtClock(rep.typicalBedtimeMin), fmtClock(rep.typicalWakeMin)))}</p>` : '';
+    const sub = rep.typicalBedtimeMin != null && rep.typicalWakeMin != null ? `<p class="sub rp-sub-gap">${esc(tr('bedSummary', fmtClock(rep.typicalBedtimeMin), fmtClock(rep.typicalWakeMin)))}</p>` : '';
     const rows = rep.schedule.slice().reverse().map(d => {
       const p = partsOf(d.date);
       return `<tr><th scope="row">${esc(`${WDS[lang][p.wd]} ${p.d}`)}</th><td>${esc(fmtClock(d.bedtimeMin))}</td><td>${esc(fmtClock(d.wakeMin))}</td><td class="rp-strong">${esc(fmtDur(d.nightMin))}</td></tr>`;
@@ -501,7 +505,7 @@ globalThis.LittleDaysReportsUI = (() => {
     };
     const labels = xLabels(rep.days);
     const rows = rep.days.map((d, i) => ({x: labels[i].x, anchor: labels[i].anchor, v: [d.breastCount || 0, d.bottleCount || 0]}));
-    return CH().reportColumns(326, tr('feedsPerDay'), rows, panel);
+    return CH().reportColumns(reportPlotWidth(), tr('feedsPerDay'), rows, panel);
   }
 
   function sideBalanceHTML(sb) {
@@ -533,7 +537,7 @@ globalThis.LittleDaysReportsUI = (() => {
     const hero = isOne ? `${esc(tr('oneFeedWord'))}<span class="rp-hero-unit">${esc(tr('feedInDays', R.period))}</span>`
       : `${esc(fmt1(rep.avgFeeds))}<span class="rp-hero-unit">${esc(tr('feedsUnit'))}</span>`;
     const stats = isOne
-      ? (rep.avgBottleMl > 0 ? `<div class="rp-stats"><div class="rp-stat tinted" style="grid-column:1/-1"><span class="rp-stat-label">${esc(tr('bottleAvg'))}</span><span class="rp-stat-val">${esc(fmtVolume(rep.avgBottleMl))}</span><span class="rp-stat-sub">${esc(tr('bottlesSingle'))}</span></div></div>` : '')
+      ? (rep.avgBottleMl > 0 ? `<div class="rp-stats"><div class="rp-stat tinted rp-stat-wide"><span class="rp-stat-label">${esc(tr('bottleAvg'))}</span><span class="rp-stat-val">${esc(fmtVolume(rep.avgBottleMl))}</span><span class="rp-stat-sub">${esc(tr('bottlesSingle'))}</span></div></div>` : '')
       : `<div class="rp-stats"><div class="rp-stat tinted"><span class="rp-stat-label">${esc(tr('usualGap'))}</span><span class="rp-stat-val">${esc(fmtDur(rep.gaps.all.median))}</span><span class="rp-stat-sub">${esc(tr('betweenStarts'))}</span></div>`
         + `<div class="rp-stat tinted"><span class="rp-stat-label">${esc(tr('bottleAvg'))}</span><span class="rp-stat-val">${esc(fmtVolume(rep.avgBottleMl))}</span><span class="rp-stat-sub">${esc(tr('bottlesDay', fmt1(rep.avgBottlesPerDay || 0)))}</span></div></div>`;
     const note = isOne && onlyDay ? tr('oneFeedNote', `${WDS[S.lang === 'es' ? 'es' : 'en'][partsOf(onlyDay.date).wd]}, ${shortDate(onlyDay.date)}`)
@@ -576,7 +580,8 @@ globalThis.LittleDaysReportsUI = (() => {
   function doctorMedsCard(rep, p, today) {
     if (!p.medication) return '';
     const rows = rep.medicines.map(m => {
-      const dose = m.dose != null ? `${m.dose}${m.unit ? NB + m.unit : ''}` : '';
+      const unit = m.unit === 'ml' ? 'mL' : m.unit;
+      const dose = m.dose != null ? `${m.dose}${unit ? NB + unit : ''}` : '';
       const lastDate = shortDate(shiftISO(today, m.lastDayOffset));
       return `<div class="rp-kv-row"><div class="rp-kv-main"><strong>${esc(m.name)}</strong><span class="sub">${esc(tr('medDoses', dose, m.doses, rep.windowDays))}</span><span class="sub">${esc(tr('medLast', lastDate, fmtClock(m.lastClockMin)))}</span></div></div>`;
     }).join('');
@@ -602,8 +607,8 @@ globalThis.LittleDaysReportsUI = (() => {
       const dp = partsOf(d.date);
       return `<div class="rp-day-item"><div class="rp-day-date"><span class="wd">${esc(WDS[lang][dp.wd])}</span><span class="num">${dp.d}</span></div><div class="rp-day-lines">${doctorDayLines(d)}</div></div>`;
     }).join('');
-    const dayList = dayItems ? `<section class="card"><h2>${esc(tr('dayByDay'))}</h2><p class="sub" style="margin-bottom:12px">${esc(tr('dayByDaySub', days))}</p><div class="rp-day-list">${dayItems}</div></section>` : '';
-    const actions = `<div class="rp-actions"><button type="button" class="btn-primary" data-act="report-print">${esc(tr('printReport'))}</button><a class="back" href="${esc(rep.exportUrl)}" download="little-days.csv" data-act="report-csv">${esc(tr('downloadCsv'))}</a></div>`;
+    const dayList = dayItems ? `<section class="card"><h2>${esc(tr('dayByDay'))}</h2><p class="sub rp-sub-gap">${esc(tr('dayByDaySub', days))}</p><div class="rp-day-list">${dayItems}</div></section>` : '';
+    const actions = `<div class="rp-actions"><button type="button" class="btn-primary" data-act="report-print">${esc(tr('printReport'))}</button><a class="textlink" href="${esc(rep.exportUrl)}" download="little-days.csv" data-act="report-csv">${esc(tr('downloadCsv'))}${glyph('chev')}</a></div>`;
     if (!avgs && !growth && !rep.medicines.length && !dayItems) return sheetWrap(tr('doctorTitle'), head + emptyCard('emptyDoctor'));
     return sheetWrap(tr('doctorTitle'), head + actions + avgs + growth + meds + dayList);
   }

@@ -123,7 +123,7 @@ def audit_rows(browser, base):
     check(f"a row is a 64 px row with one edit button in its title, a second line and the time: {rows['r-feed']}",
           all(r["tag"] == "LI" and r["buttons"] == 1 and r["height"] == 64 for r in rows.values()) and rows["r-feed"]["title"] == "Breast · Right" and rows["r-feed"]["sub"] == "26 min · Sam" and rows["r-feed"]["time"] == "10:00 AM")
     check(f"bottle, diaper and note rows read as the mockup writes them: {[rows[k]['title'] for k in ('r-bottle', 'r-dia', 'r-note')]}",
-          rows["r-bottle"]["title"] == "Bottle · 120 ml" and rows["r-bottle"]["sub"] == "Formula · Alex" and rows["r-dia"]["title"] == "Diaper · Wet and dirty" and rows["r-note"]["title"] == "Note · Alex" and rows["r-note"]["sub"] == "Fussy after the bottle.")
+          rows["r-bottle"]["title"] == "Bottle · 120 mL" and rows["r-bottle"]["sub"] == "Formula · Alex" and rows["r-dia"]["title"] == "Diaper · Wet and dirty" and rows["r-note"]["title"] == "Note · Alex" and rows["r-note"]["sub"] == "Fussy after the bottle.")
     check("no row keeps the 'ago' line or the who chip", not any(r["ago"] or r["chip"] for r in rows.values()))
     check(f"a note and a medicine row use the neutral icon block, a feed the feed color: {rows['r-note']['plate']} {rows['r-med']['plate']} {rows['r-feed']['plate']}",
           rows["r-note"]["plate"] == rows["r-med"]["plate"] == "rgb(224, 225, 230)" and rows["r-feed"]["plate"] == "rgb(244, 194, 106)" and rows["r-med"]["title"] == "Medicine")

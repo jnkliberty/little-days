@@ -787,7 +787,7 @@ globalThis.LittleDaysCryUI = (() => {
     const ok = C.list.state === 'ok';
     const row = (act, key, title, sub) => `<li><button type="button" class="nav-row" data-act="${act}"><span><strong>${title}</strong><span class="sub" data-cry-sub="${key}"${sub ? '' : ' hidden'}>${sub}</span></span>${chev()}</button></li>`;
     const del = can('change') ? row('cry-delall', 'delall', tr('delAll'), ok ? tr('delAllSub', keptClips()) : '') : '';
-    return `<section class="day" id="cry-settings"><h2>${tr('cryTitle')}</h2><div class="card"><div class="form-field"><span class="fl" id="cs-l">${tr('setSound')}</span><div class="chips" role="group" aria-labelledby="cs-l">${pick('on')}${pick('off')}</div></div></div><div class="card nav"><ul>${row('cry-past', 'past', tr('past'), ok ? tr('pastSub', C.list.count) : '')}${del}</ul></div></section>`;
+    return `<section class="day" id="cry-settings"><h2>${tr('cryTitle')}</h2><div class="card"><div class="form-field"><span class="fl" id="cs-l">${tr('setSound')}</span><div class="chips seg-control" role="group" aria-labelledby="cs-l">${pick('on')}${pick('off')}</div></div></div><div class="card nav"><ul>${row('cry-past', 'past', tr('past'), ok ? tr('pastSub', C.list.count) : '')}${del}</ul></div></section>`;
   }
   // One save at a time: both buttons wait for the reply, so On and Off cannot reach the server out of order.
   function saveSound(v) {

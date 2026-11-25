@@ -560,11 +560,11 @@ def audit_day_totals(browser, base):
     at = datetime.fromisoformat("2026-11-10T12:00:00-06:00")
     DAY_TOTAL_SHOTS.mkdir(parents=True, exist_ok=True)
     expected = {
-        "en": {"feed": "4 feeds · 40 min · 180 ml", "sleep": "3 h 30 min · 2 sleeps", "diaper": "Wet 2 · Dirty 2",
-               "today": "4 feeds · 40 min · 180 ml | 3 h 30 min · 2 sleeps | Wet 2 · Dirty 2",
+        "en": {"feed": "4 feeds · 40 min · 180 mL", "sleep": "3 h 30 min · 2 sleeps", "diaper": "Wet 2 · Dirty 2",
+               "today": "4 feeds · 40 min · 180 mL | 3 h 30 min · 2 sleeps | Wet 2 · Dirty 2",
                "yesterday": "1 feed · 10 min | 3 h · 2 sleeps", "nobottle": "2 feeds · 25 min", "running": "5 h 30 min · 3 sleeps", "one": "1 feed · 5 min", "feeding": "1 feed · 10 min"},
-        "es": {"feed": "4 tomas · 40 min · 180 ml", "sleep": "3 h 30 min · 2 sueños", "diaper": "Pipí 2 · Popó 2",
-               "today": "4 tomas · 40 min · 180 ml | 3 h 30 min · 2 sueños | Pipí 2 · Popó 2",
+        "es": {"feed": "4 tomas · 40 min · 180 mL", "sleep": "3 h 30 min · 2 sueños", "diaper": "Pipí 2 · Popó 2",
+               "today": "4 tomas · 40 min · 180 mL | 3 h 30 min · 2 sueños | Pipí 2 · Popó 2",
                "yesterday": "1 toma · 10 min | 3 h · 2 sueños", "nobottle": "2 tomas · 25 min", "running": "5 h 30 min · 3 sueños", "one": "1 toma · 5 min", "feeding": "1 toma · 10 min"},
     }
     for lang, want in expected.items():

@@ -47,7 +47,7 @@ function equalDigest(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = DEFAULT_TTL_MS, now = Date.now }: { store: Store; babyBuddy: BabyBuddyClient; accounts?: {username: string; password: string}[]; ttlMs?: number; now?: () => number }) {
+export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = DEFAULT_TTL_MS, now = () => Date.now() }: { store: Store; babyBuddy: BabyBuddyClient; accounts?: {username: string; password: string}[]; ttlMs?: number; now?: () => number }) {
   if (!Number.isSafeInteger(ttlMs) || ttlMs < 60_000) throw new Error('Invalid session lifetime');
   // Memory only, keyed by the session ID hash, so a restart loses both. The store keeps only hashes.
   const upstreams = new Map<string, Upstream>();
@@ -62,14 +62,14 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
     return current;
   }
 
-  function pruneLoginCsrf(now = Date.now()): void {
-    for (const [token, expiresAt] of loginCsrf) if (expiresAt <= now) loginCsrf.delete(token);
+  function pruneLoginCsrf(at = now()): void {
+    for (const [token, expiresAt] of loginCsrf) if (expiresAt <= at) loginCsrf.delete(token);
   }
 
   function issueLoginCsrf(): string {
     pruneLoginCsrf();
     const token = randomBytes(32).toString('base64url');
-    loginCsrf.set(hashSecret(token), Date.now() + LOGIN_CSRF_TTL_MS);
+    loginCsrf.set(hashSecret(token), now() + LOGIN_CSRF_TTL_MS);
     return token;
   }
 
@@ -77,7 +77,7 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
     pruneLoginCsrf();
     const tokenHash = hashSecret(token);
     const expiry = loginCsrf.get(tokenHash);
-    if (!expiry || expiry <= Date.now()) throw new Error('Invalid CSRF token');
+    if (!expiry || expiry <= now()) throw new Error('Invalid CSRF token');
     loginCsrf.delete(tokenHash);
     let upstream: BabyBuddySession;
     try { upstream = await babyBuddy.login(username, password); }
@@ -85,11 +85,11 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
     const sessionId = randomBytes(32).toString('base64url');
     const csrfToken = randomBytes(32).toString('base64url');
     const adult = upstream.username;
-    const expiresAt = Date.now() + ttlMs;
+    const expiresAt = now() + ttlMs;
     try {
       store.createSession({ sessionId, csrfToken, adult, babyBuddyUserId: upstream.userId, expiresAt });
       const key = hashSecret(sessionId);
-      upstreams.set(key, { session: upstream, usedAt: Date.now() });
+      upstreams.set(key, { session: upstream, usedAt: now() });
       csrfTokens.set(key, csrfToken);
     } catch {
       await babyBuddy.logout(upstream);
@@ -115,7 +115,7 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
     if (!/^[A-Za-z0-9_-]{40,60}$/.test(sessionId)) return null;
     const record = store.getSession(sessionId);
     const key = hashSecret(sessionId);
-    if (!record || record.expiresAt <= Date.now()) {
+    if (!record || record.expiresAt <= now()) {
       forget(key);
       store.deleteSession(sessionId);
       return null;
@@ -126,7 +126,7 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
 
   // Each API request with a valid sign-in is use (app.ts), so the sign-in ends 30 days after its last use.
   function renew(sessionId: string): void {
-    store.renewSession(sessionId, Date.now() + ttlMs);
+    store.renewSession(sessionId, now() + ttlMs);
   }
 
   // For GET /api/session. After a restart, the phone that loads the app again gets a new token; its hash replaces the old one.
@@ -152,9 +152,9 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
   async function upstreamFor(sessionId: string): Promise<BabyBuddySession> {
     const record = get(sessionId) && store.getSession(sessionId);
     if (!record) throw new Error('Session expired');
-    const key = hashSecret(sessionId), current = upstreams.get(key), now = Date.now();
-    if (current && now - current.usedAt < UPSTREAM_IDLE_MS) {
-      current.usedAt = now;
+    const key = hashSecret(sessionId), current = upstreams.get(key), at = now();
+    if (current && at - current.usedAt < UPSTREAM_IDLE_MS) {
+      current.usedAt = at;
       return current.session;
     }
     const account = accounts.find(item => item.username === record.adult);
@@ -171,7 +171,7 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
       await babyBuddy.logout(upstream).catch(() => {});
       throw new Error(same ? 'Session expired' : 'Baby Buddy identity changed');
     }
-    upstreams.set(key, { session: upstream, usedAt: now });
+    upstreams.set(key, { session: upstream, usedAt: at });
     if (current) void babyBuddy.logout(current.session).catch(() => {});
     return upstream;
   }
@@ -207,13 +207,13 @@ export function createSessionService({ store, babyBuddy, accounts = [], ttlMs = 
   }
 
   async function identityForUser(userId: number): Promise<BabyBuddyIdentity> {
-    for (const key of store.liveSessionHashesForUser(userId)) {
+    for (const key of store.liveSessionHashesForUser(userId, now())) {
       const current = upstreams.get(key);
       // Only a cached login that Baby Buddy still keeps; after a restart the parent's next request makes a new one.
-      if (!current || Date.now() - current.usedAt >= UPSTREAM_IDLE_MS) continue;
+      if (!current || now() - current.usedAt >= UPSTREAM_IDLE_MS) continue;
       const identity = await babyBuddy.identity(current.session);
       // The check reached Baby Buddy, which refreshes its login on use, so it counts as use.
-      if (identity.id === userId) { current.usedAt = Date.now(); return identity; }
+      if (identity.id === userId) { current.usedAt = now(); return identity; }
     }
     throw new Error('Baby Buddy identity check failed');
   }
